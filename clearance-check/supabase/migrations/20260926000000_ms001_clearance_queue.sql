@@ -60,12 +60,18 @@ create policy "submissions_select_by_id"
 
 -- No UPDATE or DELETE policy for anon/authenticated. service_role bypasses RLS.
 
--- Storage: public bucket for uploaded audio.
-insert into storage.buckets (id, name, public)
-values ('clearance-uploads', 'clearance-uploads', true);
+-- Storage: private bucket for uploaded audio (mp3, wav, m4a), 50 MB max.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'clearance-uploads', 'clearance-uploads', false,
+  52428800,
+  array['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a']
+);
 
--- Anyone may upload into this bucket. Public bucket = public read by URL.
--- No update/delete for anon, so uploads cannot be overwritten or removed.
+-- Anyone may upload into this bucket (MS-002 uploads with the anon key and
+-- never reads the file back). No select/update/delete policy for anon or
+-- authenticated, so objects cannot be read, listed, overwritten, or removed by
+-- clients. service_role bypasses RLS and is the only reader.
 create policy "clearance_uploads_insert_anyone"
   on storage.objects
   for insert

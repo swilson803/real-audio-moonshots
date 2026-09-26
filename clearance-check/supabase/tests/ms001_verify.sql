@@ -68,13 +68,34 @@ do $$ begin
   end if;
 end $$;
 
--- 5. Bucket exists and is public.
+-- 5. Bucket exists, is private, 50 MB limit, mp3/wav/m4a MIME types only.
 do $$ begin
   if not exists (select 1 from storage.buckets
-                 where id = 'clearance-uploads' and public) then
-    raise exception 'FAIL: public bucket clearance-uploads missing';
+                 where id = 'clearance-uploads' and not public
+                   and file_size_limit = 52428800
+                   and allowed_mime_types::text[] @> array['audio/mpeg','audio/wav','audio/x-wav','audio/mp4','audio/x-m4a']
+                   and allowed_mime_types::text[] <@ array['audio/mpeg','audio/wav','audio/x-wav','audio/mp4','audio/x-m4a']) then
+    raise exception 'FAIL: private bucket clearance-uploads missing or misconfigured';
   end if;
 end $$;
+
+-- 5b. Anon can upload an object but cannot read it back; service_role can.
+set local role anon;
+insert into storage.objects (bucket_id, name)
+values ('clearance-uploads', '00000000-0000-4000-8000-000000000001/song.mp3');
+do $$ begin
+  if (select count(*) from storage.objects where bucket_id = 'clearance-uploads') <> 0 then
+    raise exception 'FAIL: anon can read clearance-uploads objects';
+  end if;
+end $$;
+reset role;
+set local role service_role;
+do $$ begin
+  if (select count(*) from storage.objects where bucket_id = 'clearance-uploads') <> 1 then
+    raise exception 'FAIL: service_role cannot read clearance-uploads objects';
+  end if;
+end $$;
+reset role;
 
 reset role;
 select 'MS-001 verify: ALL PASS' as result;
