@@ -6,13 +6,18 @@ begin;
 
 -- 1. Anonymous insert with a file path and email creates a row at queued.
 set local role anon;
-insert into public.submissions (id, email, original_filename, storage_path)
+insert into public.submissions (id, email, original_filename, file_path)
 values ('00000000-0000-4000-8000-000000000001', 'test@example.com', 'song.mp3',
         'clearance-uploads/00000000-0000-4000-8000-000000000001/song.mp3');
 
+-- 1a. Normal REST body: file_path + email only, status omitted. The default
+--     'queued' must satisfy the insert WITH CHECK (status = 'queued').
+insert into public.submissions (email, file_path)
+values ('rest@example.com', 'clearance-uploads/00000000-0000-4000-8000-000000000002/take.wav');
+
 -- 1b. Anonymous insert cannot pre-set status or results.
 do $$ begin
-  insert into public.submissions (email, original_filename, storage_path, status)
+  insert into public.submissions (email, original_filename, file_path, status)
   values ('x@example.com', 'x.mp3', 'x', 'done');
   raise exception 'FAIL: anon set status on insert';
 exception when insufficient_privilege then null;
@@ -34,6 +39,15 @@ select set_config('request.headers', '{}', true);
 do $$ begin
   if (select count(*) from public.submissions) <> 0 then
     raise exception 'FAIL: anon can list rows without an id';
+  end if;
+end $$;
+
+-- 2c. Empty request.headers (pooled connection after a local setting ended)
+--     is treated as no header, not a JSON error.
+select set_config('request.headers', '', true);
+do $$ begin
+  if (select count(*) from public.submissions) <> 0 then
+    raise exception 'FAIL: anon sees rows with empty request.headers';
   end if;
 end $$;
 
@@ -65,6 +79,17 @@ do $$ begin
   if (select status from public.submissions
       where id = '00000000-0000-4000-8000-000000000001') <> 'done' then
     raise exception 'FAIL: service_role update did not persist';
+  end if;
+end $$;
+
+-- 4b. The file_path + email row from 1a is queued/pending, and
+--     original_filename was filled from file_path.
+do $$ begin
+  if not exists (select 1 from public.submissions
+                 where email = 'rest@example.com' and status = 'queued'
+                   and youtube_result = 'pending'
+                   and original_filename = 'take.wav') then
+    raise exception 'FAIL: file_path + email row not queued or filename not filled';
   end if;
 end $$;
 
