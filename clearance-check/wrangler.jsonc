@@ -24,5 +24,18 @@
   "triggers": {
     "crons": ["* * * * *"]
   },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // Required by `wrangler preview` (Workers Builds preview on non-production
+  // branches). Assets and compatibility settings stay top level. Vars are not
+  // inherited, so the moonshots URL is repeated here. No cron in previews, so a
+  // preview never sends results emails on its own. Preview secrets
+  // (SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY) are set on
+  // the Worker, not in this file.
+  "previews": {
+    "vars": {
+      // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).
+      "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co"
+    },
+    "observability": { "enabled": true }
+  }
 }
