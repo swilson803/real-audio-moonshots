@@ -49,6 +49,9 @@ try {
   check('headline + lead copy (Spencer notes, verbatim)',
     (await page.textContent('h1')) === 'Music Copyright Tester'
     && (await page.textContent('.lead')) === 'Let us test the track first so you can avoid havng your content muted or demonitized.');
+  const landingWarning = await page.textContent('.landing-warning .warning');
+  check('landing shows the permanent warning', await page.isVisible('.landing-warning .warning')
+    && /reflects right now/.test(landingWarning) && /any rightsholder can turn on enforcement at any time/i.test(landingWarning), landingWarning);
   check('file selection is a sketched button, not a text input',
     await page.$eval('#file-pick', (el) => el.classList.contains('btn-default') && !el.classList.contains('input-text')));
   await page.setInputFiles('#file', { name: 'clip.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(10) });
@@ -64,6 +67,7 @@ try {
   check('over 50 MB rejected inline', /over 50 MB/.test(sizeErr), sizeErr);
   await page.fill('#email', 'a@b.co');
   await page.click('#submit');
+  check('landing warning still visible after inline errors', await page.isVisible('.landing-warning .warning'));
   check('invalid file blocks submit', page.url() === `${ORIGIN}/` && (await state()).objects.length === 0);
   await page.screenshot({ path: `${SHOTS}landing-error-1280.jpg`, fullPage: true, quality: 70 });
 

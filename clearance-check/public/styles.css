@@ -389,6 +389,8 @@ h1, h2, h3, p { margin: 0; }
 .verdict[data-flagged="true"] { color: var(--color-red); }
 @media (min-width: 768px) { .verdict { font-size: 40px; } }
 .warning { font-size: 20px; line-height: 1.4; color: var(--color-red); }
+/* Landing: same warning box as the result page, form width, above the form. */
+.landing-warning { max-width: 448px; margin: 0 auto 24px; }
 .muted { color: rgba(26, 26, 26, 0.8); }
 .center { text-align: center; }
 [hidden] { display: none !important; }
