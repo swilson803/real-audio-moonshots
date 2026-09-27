@@ -25,8 +25,8 @@
     <main class="main">
       <div class="container">
         <div class="narrow">
-          <h1 class="text-h1 headline">Will it get flagged?</h1>
-          <p class="lead">Upload a track. We check YouTube, TikTok, and Instagram and email you what we find.</p>
+          <h1 class="text-h1 headline">Music Copyright Tester</h1>
+          <p class="lead">Let us test the track first so you can avoid havng your content muted or demonitized.</p>
 
           <form id="check-form" class="my-login-modal check-form" novalidate>
             <div class="field">
@@ -34,7 +34,8 @@
               <input class="file-input" type="file" id="file" name="file"
                      accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a"
                      aria-labelledby="file-label" aria-describedby="file-hint file-error">
-              <label class="input-text file-pick" id="file-pick" for="file"><span class="file-name" id="file-name">Choose a file</span></label>
+              <label class="btn-default btn-block file-pick" id="file-pick" for="file">CHOOSE FILE</label>
+              <p class="file-name" id="file-name">No file chosen</p>
               <p class="text-caption text-mono field-hint" id="file-hint">MP3, WAV, or M4A. Up to 50 MB.</p>
               <p class="text-label field-error" id="file-error" role="alert"></p>
             </div>

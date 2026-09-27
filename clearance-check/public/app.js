@@ -21,7 +21,7 @@ function showEmailError(msg) {
 
 fileInput.addEventListener('change', () => {
   const file = fileInput.files[0];
-  fileName.textContent = file ? file.name : 'Choose a file';
+  fileName.textContent = file ? file.name : 'No file chosen';
   filePick.classList.toggle('has-file', Boolean(file));
   showFileError(file ? validateFile(file) : null);
 });

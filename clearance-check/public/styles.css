@@ -363,10 +363,13 @@ h1, h2, h3, p { margin: 0; }
 
 /* File picker: native input visually hidden; the brand input frame is the control. */
 .file-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); }
-.file-pick { cursor: pointer; min-height: 40px; display: flex; align-items: center; }
+/* Undo the .field frame pull-out so the button lines up with the CTA below. */
+.file-pick { margin: 6px 0 0 9px; width: calc(100% - 38px); }
+/* Error: the red state .btn-default already uses on hover. */
+.file-pick.error { color: var(--color-red); border-image-source: url('/brand-assets/frames/frame-button-heavy-red.webp'); }
 .file-input:focus-visible + .file-pick { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; }
-.file-name { font-family: var(--font-body); font-size: 16px; word-break: break-all; }
-.file-pick:not(.has-file) .file-name { color: var(--color-placeholder); }
+.file-name { font-family: var(--font-mono); font-size: 14px; word-break: break-all; margin-top: 4px; }
+.file-pick:not(.has-file) + .file-name { color: rgba(26, 26, 26, 0.8); }
 
 .actions { display: flex; justify-content: center; padding-top: 8px; }
 

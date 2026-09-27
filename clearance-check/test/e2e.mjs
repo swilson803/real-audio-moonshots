@@ -46,6 +46,11 @@ try {
 
   // Bad type / size rejected inline, nothing uploaded.
   await page.goto(ORIGIN);
+  check('headline + lead copy (Spencer notes, verbatim)',
+    (await page.textContent('h1')) === 'Music Copyright Tester'
+    && (await page.textContent('.lead')) === 'Let us test the track first so you can avoid havng your content muted or demonitized.');
+  check('file selection is a sketched button, not a text input',
+    await page.$eval('#file-pick', (el) => el.classList.contains('btn-default') && !el.classList.contains('input-text')));
   await page.setInputFiles('#file', { name: 'clip.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(10) });
   const typeErr = await page.textContent('#file-error');
   check('bad file type rejected inline', /isn’t supported/.test(typeErr), typeErr);
