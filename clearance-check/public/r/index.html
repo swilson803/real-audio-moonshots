@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your result | Real Audio</title>
+  <meta name="description" content="Upload a track and see whether YouTube, TikTok, and Instagram flag it right now.">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <meta name="robots" content="noindex">
+</head>
+<body>
+  <div class="page surface-sketched">
+    <nav class="nav">
+      <div class="nav-inner">
+        <a href="https://library.real.audio">
+          <img class="nav-logo nav-logo--mobile" src="/brand-assets/logo/logo-mobile.webp" alt="Real Audio">
+          <img class="nav-logo nav-logo--desktop" src="/brand-assets/logo/logo.webp" alt="Real Audio">
+        </a>
+      </div>
+    </nav>
+
+    <main class="main">
+      <div class="container">
+        <div class="narrow stack">
+          <h1 class="text-h1 headline">Your result</h1>
+
+          <div class="box-sketched-light-red">
+            <p class="warning">This reflects right now. Any rightsholder can turn on enforcement at any time, so a clear result today can change later.</p>
+          </div>
+
+          <p class="lead" id="summary">Loading…</p>
+
+          <div class="box-sketched-heavy" id="verdict-box" hidden>
+            <p class="verdict" id="verdict" aria-live="polite"></p>
+          </div>
+
+          <div class="box-sketched-light" id="platforms-box" hidden>
+            <ul class="platforms" id="platforms" aria-live="polite"></ul>
+          </div>
+
+          <p class="text-label muted center" id="footnote"></p>
+
+          <div class="actions">
+            <a class="btn-default" href="/">Check another track</a>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="/result.js" type="module"></script>
+</body>
+</html>

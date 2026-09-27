@@ -1,0 +1,28 @@
+// Cloudflare Worker for MS-002 Clearance Check.
+// This file lives in clearance-check/, so the Workers Builds "Root directory"
+// must be clearance-check (set in Cloudflare, not in this file).
+//
+// Secrets (set on the Worker, never committed):
+//   SUPABASE_ANON_KEY          moonshots anon key (public, sent to the browser)
+//   SUPABASE_SERVICE_ROLE_KEY  moonshots service role key (server only)
+//   RESEND_API_KEY             Resend key
+// Optional vars: SITE_URL (needed for the cron sweep's result links), EMAIL_FROM.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clearance-check",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/r/*"]
+  },
+  "vars": {
+    // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).
+    "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co"
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "observability": { "enabled": true }
+}

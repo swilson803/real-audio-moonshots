@@ -1,0 +1,9 @@
+{
+  "name": "clearance-check",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node test/harness.mjs",
+    "test": "node test/e2e.mjs"
+  }
+}

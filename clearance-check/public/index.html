@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clearance Check | Real Audio</title>
+  <meta name="description" content="Upload a track and see whether YouTube, TikTok, and Instagram flag it right now.">
+  <link rel="icon" href="/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="page surface-sketched">
+    <nav class="nav">
+      <div class="nav-inner">
+        <a href="https://library.real.audio">
+          <img class="nav-logo nav-logo--mobile" src="/brand-assets/logo/logo-mobile.webp" alt="Real Audio">
+          <img class="nav-logo nav-logo--desktop" src="/brand-assets/logo/logo.webp" alt="Real Audio">
+        </a>
+      </div>
+    </nav>
+
+    <main class="main">
+      <div class="container">
+        <div class="narrow">
+          <h1 class="text-h1 headline">Will it get flagged?</h1>
+          <p class="lead">Upload a track. We check YouTube, TikTok, and Instagram and email you what we find.</p>
+
+          <form id="check-form" class="my-login-modal check-form" novalidate>
+            <div class="field">
+              <span class="field-label" id="file-label">Audio file</span>
+              <input class="file-input" type="file" id="file" name="file"
+                     accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a"
+                     aria-labelledby="file-label" aria-describedby="file-hint file-error">
+              <label class="input-text file-pick" id="file-pick" for="file"><span class="file-name" id="file-name">Choose a file</span></label>
+              <p class="text-caption text-mono field-hint" id="file-hint">MP3, WAV, or M4A. Up to 50 MB.</p>
+              <p class="text-label field-error" id="file-error" role="alert"></p>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="email">Email</label>
+              <input class="input-text" type="email" id="email" name="email" autocomplete="email"
+                     aria-describedby="email-error" required>
+              <p class="text-label field-error" id="email-error" role="alert"></p>
+            </div>
+
+            <p class="text-label field-error center" id="form-error" role="alert"></p>
+
+            <div class="my-login-buttons">
+              <button class="btn-primary-cta btn-block" type="submit" id="submit">CHECK MY TRACK</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
