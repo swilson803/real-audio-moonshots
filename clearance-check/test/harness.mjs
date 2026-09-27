@@ -10,9 +10,11 @@ const PORT = Number(process.env.PORT || 8787);
 const ORIGIN = `http://localhost:${PORT}`;
 const PUBLIC = new URL('../public/', import.meta.url).pathname;
 const ALLOWED_MIME = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a'];
-const MAX = 52428800;
+// Mock bucket limit: 50 MB like MS-001's migration; tests can raise it.
+let MAX = 52428800;
+export const setBucketLimit = (n) => { MAX = n; };
 
-export const state = { rows: new Map(), objects: new Map(), emails: [], notifyCalls: 0 };
+export const state = { rows: new Map(), objects: new Map(), emails: [] };
 
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.webp': 'image/webp', '.ico': 'image/x-icon' };
 const ASSETS = {
@@ -127,7 +129,7 @@ export function start() {
     }
     if (url.pathname === '/test/state') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ rows: [...state.rows.values()], objects: [...state.objects], emails: state.emails, notifyCalls: state.notifyCalls }));
+      return res.end(JSON.stringify({ rows: [...state.rows.values()], objects: [...state.objects], emails: state.emails }));
     }
     if (url.pathname === '/test/update' && req.method === 'POST') {
       const { id, ...patch } = JSON.parse(body.toString());
@@ -136,7 +138,6 @@ export function start() {
       return res.end();
     }
 
-    if (url.pathname === '/api/notify') state.notifyCalls++;
     const request = new Request(url, { method: req.method, headers: req.headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : body });
     const out = await worker.fetch(request, env, { waitUntil() {} });
     res.writeHead(out.status, Object.fromEntries(out.headers));

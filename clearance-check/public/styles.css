@@ -1,5 +1,5 @@
 /* Clearance Check — Real Audio brand "sketched" system.
-   Everything in the COPIED block is verbatim from real-audio-creator
+   Everything in the COPIED block is verbatim (the subset this page uses) from real-audio-creator
    src/index.css (tokens, surface, type scale, box / button / input classes).
    Do not edit those rules here; change them in Creator and re-copy.
    Only the PAGE LAYOUT block at the bottom is local, and it uses the proven
@@ -62,23 +62,8 @@ body {
   font-weight: 700;
 }
 
-.text-h2 {
-  font-size: 28px;
-  line-height: 1.2;
-  font-weight: 600;
-}
 
-.text-h3 {
-  font-size: 24px;
-  line-height: 1.3;
-  font-weight: 600;
-}
 
-.text-body {
-  font-size: 16px;
-  line-height: 1.6;
-  font-weight: 400;
-}
 
 .text-label {
   font-size: 14px;
@@ -100,7 +85,6 @@ body {
 
 @media (min-width: 768px) {
   .text-h1 { font-size: 64px; }
-  .text-h2 { font-size: 40px; }
 }
 
 .box-sketched-heavy {
@@ -134,8 +118,7 @@ body {
 }
 
 .btn-default,
-.btn-primary-cta,
-.btn-text {
+.btn-primary-cta {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -151,15 +134,13 @@ body {
 }
 
 .btn-default:focus-visible,
-.btn-primary-cta:focus-visible,
-.btn-text:focus-visible {
+.btn-primary-cta:focus-visible {
   outline: 2px solid hsl(var(--brand-accent));
   outline-offset: 3px;
 }
 
 .btn-default:disabled,
-.btn-primary-cta:disabled,
-.btn-text:disabled {
+.btn-primary-cta:disabled {
   opacity: 0.5;
   pointer-events: none;
 }
@@ -203,21 +184,8 @@ body {
   filter: brightness(0.88);
 }
 
-.btn-text {
-  color: var(--color-black);
-  border: none;
-  padding: var(--space-2) var(--space-3);
-}
 
-.btn-text:hover {
-  color: var(--color-red);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
 
-.btn-text:active {
-  transform: scale(0.98);
-}
 
 .input-text {
   display: block;
@@ -329,6 +297,12 @@ h1, h2, h3, p { margin: 0; }
 }
 @media (min-width: 768px) { .nav { padding: 8px 24px 0; } .nav-logo--desktop { height: 48px; } }
 @media (min-width: 1024px) { .nav { padding: 12px 40px 0; } .nav-logo--desktop { height: 56px; } }
+/* Line under the logo, as Navigation.tsx: line-medium-black, bleeds past the
+   nav gutter (-mx-3 sm:-mx-4 md:-mx-6 lg:-mx-10), mt-1 → lg:mt-3, -mb-px. */
+.nav-line { display: block; max-width: none; margin: 4px -12px -1px; width: calc(100% + 24px); }
+@media (min-width: 640px) { .nav-line { margin: 6px -16px -1px; width: calc(100% + 32px); } }
+@media (min-width: 768px) { .nav-line { margin: 8px -24px -1px; width: calc(100% + 48px); } }
+@media (min-width: 1024px) { .nav-line { margin: 12px -40px -1px; width: calc(100% + 80px); } }
 
 /* Reading page: max-w-[1084px], gutter px-5 md:px-10; hero pt-8 md:pt-12 pb-10 md:pb-14 */
 .main { flex: 1; width: 100%; }
@@ -363,12 +337,15 @@ h1, h2, h3, p { margin: 0; }
 
 /* File picker: native input visually hidden; the brand input frame is the control. */
 .file-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); }
-/* Undo the .field frame pull-out so the button lines up with the CTA below. */
-.file-pick { margin: 6px 0 0 9px; width: calc(100% - 38px); }
-/* Error: the red state .btn-default already uses on hover. */
-.file-pick.error { color: var(--color-red); border-image-source: url('/brand-assets/frames/frame-button-heavy-red.webp'); }
+/* Undo the .field frame pull-out so the button (and the lines under it) line
+   up with the CTA below. Red at rest; hover only expands (no darken). */
+.file-pick, .file-name, .file-hint, .file-error { margin-left: 9px; width: calc(100% - 38px); }
+.file-pick { margin-top: 6px; }
+.file-pick:hover { filter: none; }
+.file-name, .file-hint, .file-error { text-align: center; }
+.field + .field { margin-top: 20px; }
 .file-input:focus-visible + .file-pick { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; }
-.file-name { font-family: var(--font-mono); font-size: 14px; word-break: break-all; margin-top: 4px; }
+.file-name { font-family: var(--font-mono); font-size: 14px; word-break: break-all; margin-top: 6px; }
 .file-pick:not(.has-file) + .file-name { color: rgba(26, 26, 26, 0.8); }
 
 .actions { display: flex; justify-content: center; padding-top: 8px; }

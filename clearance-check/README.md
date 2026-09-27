@@ -1,6 +1,6 @@
 # clearance-check
 
-MS-002: upload a track (mp3/wav/m4a, ≤ 50 MB) + email → queued row in
+MS-002: upload a track (mp3/wav/m4a; no size cap in the page, the storage bucket decides) + email → queued row in
 `public.submissions` (MS-001) → `/r/<id>` shows per-platform status, a verdict
 when all three are in, and a permanent "reflects right now" warning. One results
 email via Resend when `status = done` and `emailed_at is null`; `emailed_at` is

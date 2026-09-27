@@ -2,7 +2,6 @@
 // (/api/config) so the page never hard-codes a project; the Worker only ever
 // serves the moonshots project.
 
-export const MAX_BYTES = 50 * 1024 * 1024; // matches the clearance-uploads bucket limit
 export const BUCKET = 'clearance-uploads';
 
 // Extension -> the MIME type we upload with. Browsers report m4a/wav under
@@ -29,7 +28,6 @@ export function validateFile(file) {
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   if (!TYPES[ext]) return 'That file type isn’t supported. Use MP3, WAV, or M4A.';
   if (file.size === 0) return 'That file is empty.';
-  if (file.size > MAX_BYTES) return 'That file is over 50 MB. Use a smaller file.';
   return null;
 }
 

@@ -12,7 +12,6 @@ const submit = document.getElementById('submit');
 
 function showFileError(msg) {
   fileError.textContent = msg || '';
-  filePick.classList.toggle('error', Boolean(msg));
 }
 function showEmailError(msg) {
   emailError.textContent = msg || '';
@@ -55,6 +54,7 @@ form.addEventListener('submit', async (e) => {
       headers: { ...auth, 'Content-Type': TYPES[ext], 'x-upsert': 'false' },
       body: file,
     });
+    if (up.status === 413) throw new Error('too-large');
     if (!up.ok) throw new Error(`upload ${up.status}`);
 
     const ins = await fetch(`${supabaseUrl}/rest/v1/submissions`, {
@@ -67,7 +67,8 @@ form.addEventListener('submit', async (e) => {
     window.location.assign(`/r/${id}`);
   } catch (err) {
     console.error(err);
-    formError.textContent = err.message === 'config'
+    if (err.message === 'too-large') showFileError('That file is too large for the checker. Try a smaller file.');
+    else formError.textContent = err.message === 'config'
       ? 'Uploads aren’t available right now. Try again later.'
       : 'Something went wrong uploading. Try again.';
     submit.disabled = false;

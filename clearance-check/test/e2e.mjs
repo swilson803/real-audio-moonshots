@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { start, env, KEYS } from './harness.mjs';
+import { start, env, KEYS, setBucketLimit } from './harness.mjs';
 
 const require = createRequire(import.meta.url);
 let chromium;
@@ -53,22 +53,35 @@ try {
   check('landing shows the permanent warning', await page.isVisible('.landing-warning .warning')
     && /reflects right now/.test(landingWarning) && /any rightsholder can turn on enforcement at any time/i.test(landingWarning), landingWarning);
   check('file selection is a sketched button, not a text input',
-    await page.$eval('#file-pick', (el) => el.classList.contains('btn-default') && !el.classList.contains('input-text')));
+    await page.$eval('#file-pick', (el) => el.textContent === 'CHOOSE FILE' && el.classList.contains('btn-primary-cta') && !el.classList.contains('input-text')));
+  const rest = await page.$eval('#file-pick', (el) => getComputedStyle(el).color);
+  await page.hover('#file-pick');
+  await page.waitForTimeout(250);
+  const hov = await page.$eval('#file-pick', (el) => ({ c: getComputedStyle(el).color, t: getComputedStyle(el).transform, f: getComputedStyle(el).filter }));
+  check('CHOOSE FILE red at rest, only expands on hover', rest === 'rgb(229, 90, 60)' && hov.c === rest && hov.t.startsWith('matrix(1.02') && hov.f === 'none', `${rest} -> ${JSON.stringify(hov)}`);
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(250);
+  check('line under the logo', await page.isVisible('nav .nav-line'));
+  const align = await page.$$eval('#file-pick, #file-name, #file-hint', (els) => els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right), getComputedStyle(e).textAlign]; }));
+  check('file subtext centred under the button', align.every(([l, r]) => l === align[0][0] && r === align[0][1]) && align.slice(1).every((a) => a[2] === 'center'), JSON.stringify(align));
   await page.setInputFiles('#file', { name: 'clip.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(10) });
   const typeErr = await page.textContent('#file-error');
   check('bad file type rejected inline', /isn’t supported/.test(typeErr), typeErr);
   await page.setInputFiles('#file', { name: 'song.flac', mimeType: 'audio/flac', buffer: Buffer.alloc(10) });
   check('flac rejected inline', /isn’t supported/.test(await page.textContent('#file-error')));
+  // No 50 MB cap in the page (Spencer note 4). If the bucket itself refuses a
+  // size (harness bucket: 50 MB, like MS-001's migration), say so inline.
   const big = new URL('./big.mp3', import.meta.url).pathname;
-  await writeFile(big, Buffer.alloc(50 * 1024 * 1024 + 1));
+  await writeFile(big, Buffer.alloc(60 * 1024 * 1024));
   await page.setInputFiles('#file', big);
-  await rm(big);
-  const sizeErr = await page.textContent('#file-error');
-  check('over 50 MB rejected inline', /over 50 MB/.test(sizeErr), sizeErr);
+  check('60 MB file passes page validation', (await page.textContent('#file-error')) === '' && (await page.textContent('#file-name')) === 'big.mp3');
   await page.fill('#email', 'a@b.co');
   await page.click('#submit');
+  await page.waitForFunction(() => /too large/.test(document.getElementById('file-error').textContent), null, { timeout: 30000 });
+  await rm(big);
+  check('bucket size rejection shown inline', /too large for the checker/.test(await page.textContent('#file-error')));
   check('landing warning still visible after inline errors', await page.isVisible('.landing-warning .warning'));
-  check('invalid file blocks submit', page.url() === `${ORIGIN}/` && (await state()).objects.length === 0);
+  check('rejected file blocks submit', page.url() === `${ORIGIN}/` && (await state()).objects.length === 0 && (await state()).rows.length === 0);
   await page.screenshot({ path: `${SHOTS}landing-error-1280.jpg`, fullPage: true, quality: 70 });
 
   // Bad email rejected inline.
@@ -136,6 +149,21 @@ try {
   check('parallel notify sends once', (await state()).emails.filter((e) => e.to[0] === 'x@example.com').length === 1);
 
   // All-clear verdict copy.
+  // Bucket that accepts large files (the limit raised on moonshots): 60 MB lands.
+  setBucketLimit(Infinity);
+  const p3 = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await p3.goto(ORIGIN);
+  const big2 = new URL('./big2.wav', import.meta.url).pathname;
+  await writeFile(big2, Buffer.alloc(60 * 1024 * 1024));
+  await p3.setInputFiles('#file', big2);
+  await p3.fill('#email', 'big@example.com');
+  await Promise.all([p3.waitForURL(/\/r\/[0-9a-f-]{36}$/, { timeout: 60000 }), p3.click('#submit')]);
+  await rm(big2);
+  check('60 MB file uploads and lands on /r/[id] when the bucket allows it', (await state()).objects.some(([, n]) => n === 60 * 1024 * 1024));
+  await p3.goto(`${ORIGIN}/r/${p3.url().split('/r/')[1] || ''}`).catch(() => {});
+  check('line under the logo on the result page', await p3.isVisible('nav .nav-line'));
+  await p3.close();
+
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   p2.on('request', (r) => hosts.add(new URL(r.url()).host));
   await p2.goto(`${ORIGIN}/r/${fresh}`);
