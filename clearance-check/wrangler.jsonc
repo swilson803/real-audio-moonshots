@@ -3,8 +3,6 @@
 // must be clearance-check (set in Cloudflare, not in this file).
 //
 // Secrets (set on the Worker, never committed):
-//   SUPABASE_ANON_KEY          moonshots anon key (public, sent to the browser)
-//                              or SUPABASE_PUBLISHABLE_KEY (sb_publishable_...)
 //   SUPABASE_SERVICE_ROLE_KEY  moonshots service role key (server only)
 //                              or SUPABASE_SECRET_KEY (sb_secret_...)
 //   RESEND_API_KEY             Resend key
@@ -21,7 +19,10 @@
   },
   "vars": {
     // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).
-    "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co"
+    "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co",
+    // moonshots anon key: public by design (sent to every browser; RLS guards
+    // the data). Never put the service role / secret key here.
+    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1Y3dwbXRrY3RhZnpraXZ1cXR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjA4OTIsImV4cCI6MjEwNTkzNjg5Mn0.47xkt5QDTTuiUqiyxHcoNiDELVayN4kktsB04uFfLXI"
   },
   "triggers": {
     "crons": ["* * * * *"]
@@ -31,12 +32,14 @@
   // branches). Assets and compatibility settings stay top level. Vars are not
   // inherited, so the moonshots URL is repeated here. No cron in previews, so a
   // preview never sends results emails on its own. Preview secrets
-  // (SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY) are set on
+  // (SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY) are set on
   // the Worker, not in this file.
   "previews": {
     "vars": {
       // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).
-      "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co"
+      "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co",
+      // moonshots anon key: public by design. Never a service role / secret key.
+      "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1Y3dwbXRrY3RhZnpraXZ1cXR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjA4OTIsImV4cCI6MjEwNTkzNjg5Mn0.47xkt5QDTTuiUqiyxHcoNiDELVayN4kktsB04uFfLXI"
     },
     "observability": { "enabled": true }
   }

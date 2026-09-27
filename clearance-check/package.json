@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "dev": "node test/harness.mjs",
-    "test": "KEY_STYLE=legacy node test/e2e.mjs && KEY_STYLE=new node test/e2e.mjs"
+    "test": "node test/config.mjs && KEY_STYLE=legacy node test/e2e.mjs && KEY_STYLE=new node test/e2e.mjs"
   }
 }

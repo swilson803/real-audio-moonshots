@@ -3,8 +3,7 @@
 // clearance-check/. Keep in sync with clearance-check/wrangler.jsonc, which is
 // used once Builds root is set to clearance-check.
 //
-// Secrets (set on the Worker, never committed): SUPABASE_ANON_KEY (or
-// SUPABASE_PUBLISHABLE_KEY), SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY),
+// Secrets (set on the Worker, never committed): SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY),
 // RESEND_API_KEY. Optional vars: SITE_URL, EMAIL_FROM.
 {
   "name": "clearance-check",
@@ -17,7 +16,10 @@
   },
   "vars": {
     // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).
-    "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co"
+    "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co",
+    // moonshots anon key: public by design (sent to every browser; RLS guards
+    // the data). Never put the service role / secret key here.
+    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1Y3dwbXRrY3RhZnpraXZ1cXR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjA4OTIsImV4cCI6MjEwNTkzNjg5Mn0.47xkt5QDTTuiUqiyxHcoNiDELVayN4kktsB04uFfLXI"
   },
   "triggers": {
     "crons": ["* * * * *"]
@@ -28,7 +30,9 @@
   "previews": {
     "vars": {
       // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).
-      "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co"
+      "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co",
+      // moonshots anon key: public by design. Never a service role / secret key.
+      "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1Y3dwbXRrY3RhZnpraXZ1cXR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjA4OTIsImV4cCI6MjEwNTkzNjg5Mn0.47xkt5QDTTuiUqiyxHcoNiDELVayN4kktsB04uFfLXI"
     },
     "observability": { "enabled": true }
   }

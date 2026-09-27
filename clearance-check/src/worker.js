@@ -14,6 +14,16 @@ const MOONSHOTS_REF = 'kucwpmtkctafzkivuqtu';
 const PRODUCTION_REF = 'uprfsmwbsvzuoiyfgtgx';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Project ref inside a legacy JWT key (null for sb_ keys or garbage).
+function jwtRef(key) {
+  try {
+    const b64 = key.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4))).ref || null;
+  } catch {
+    return null;
+  }
+}
+
 function supabaseUrl(env) {
   const url = (env.SUPABASE_URL || `https://${MOONSHOTS_REF}.supabase.co`).replace(/\/+$/, '');
   if (url.includes(PRODUCTION_REF)) throw new Error('Refusing to talk to Real Audio production Supabase');
@@ -29,7 +39,12 @@ function json(body, status = 200) {
 
 // Worker secrets. Either Supabase key style works: legacy anon / service_role
 // JWTs, or the newer publishable / secret keys under their own names.
-const anonKey = (env) => env.SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY;
+// SUPABASE_ANON_KEY is committed as a public var in wrangler.jsonc.
+const anonKey = (env) => {
+  const key = env.SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY;
+  if (key && jwtRef(key) && jwtRef(key) !== MOONSHOTS_REF) throw new Error('Refusing a Supabase key for another project');
+  return key;
+};
 const serviceKey = (env) => env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY;
 
 // Names (never values) of the secrets a route still needs, for a clear 503.
