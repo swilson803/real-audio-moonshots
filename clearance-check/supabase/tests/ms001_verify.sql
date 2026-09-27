@@ -1,6 +1,8 @@
 -- MS-001 verification. Run against the moonshots project AFTER the migration is
--- applied (SQL editor or psql as postgres). Everything runs in one transaction
+-- applied (psql or Supabase CLI as postgres; not the dashboard). Everything runs in one transaction
 -- and is rolled back, so no test rows are left behind. Any failure raises.
+-- Safe with existing data (e.g. KEEP row 96e844a2-d144-453d-be5b-278088849e1d
+-- and its upload): checks are scoped to the test ids/paths, nothing is deleted.
 
 begin;
 
@@ -124,7 +126,9 @@ end $$;
 reset role;
 set local role service_role;
 do $$ begin
-  if (select count(*) from storage.objects where bucket_id = 'clearance-uploads') <> 1 then
+  if (select count(*) from storage.objects
+      where bucket_id = 'clearance-uploads'
+        and name = '00000000-0000-4000-8000-000000000001/song.mp3') <> 1 then
     raise exception 'FAIL: service_role cannot read clearance-uploads objects';
   end if;
 end $$;
