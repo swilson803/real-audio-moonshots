@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { start } from './harness.mjs';
+import { start, env, KEYS } from './harness.mjs';
 
 const require = createRequire(import.meta.url);
 let chromium;
@@ -121,7 +121,7 @@ try {
 
   // Concurrent notify on a fresh done row sends exactly one.
   const fresh = crypto.randomUUID();
-  await fetch(`${ORIGIN}/mock-sb/rest/v1/submissions`, { method: 'POST', headers: { Authorization: 'Bearer anon-test' }, body: JSON.stringify({ id: fresh, email: 'x@example.com', storage_path: `clearance-uploads/${fresh}/a.wav` }) });
+  await fetch(`${ORIGIN}/mock-sb/rest/v1/submissions`, { method: 'POST', headers: { apikey: KEYS.anon }, body: JSON.stringify({ id: fresh, email: 'x@example.com', storage_path: `clearance-uploads/${fresh}/a.wav` }) });
   await update({ id: fresh, status: 'done', youtube_result: 'clear', tiktok_result: 'clear', instagram_result: 'clear' });
   await Promise.all([1, 2, 3].map(() => fetch(`${ORIGIN}/api/notify`, { method: 'POST', body: JSON.stringify({ id: fresh }) })));
   check('parallel notify sends once', (await state()).emails.filter((e) => e.to[0] === 'x@example.com').length === 1);
@@ -150,6 +150,19 @@ try {
     check(`no horizontal overflow at ${w}`, o1 <= 0 && o2 <= 0, `landing ${o1}, result ${o2}`);
     await p.close();
   }
+
+  // /api/config and /api/notify say which secret is missing (names only).
+  const saved = { ...env };
+  for (const k of ['SUPABASE_ANON_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEY']) delete env[k];
+  const cfg = await fetch(`${ORIGIN}/api/config`);
+  const cfgBody = await cfg.json();
+  const nt = await fetch(`${ORIGIN}/api/notify`, { method: 'POST', body: JSON.stringify({ id }) });
+  const ntBody = await nt.json();
+  Object.assign(env, saved);
+  check('missing secrets -> 503 naming them, no key values', cfg.status === 503 && cfgBody.missing.join() === 'SUPABASE_ANON_KEY'
+    && nt.status === 503 && ntBody.missing.join() === 'SUPABASE_SERVICE_ROLE_KEY' && !JSON.stringify([cfgBody, ntBody]).includes('test'), JSON.stringify(cfgBody));
+  const okCfg = await fetch(`${ORIGIN}/api/config`).then((r) => r.json());
+  check(`/api/config serves ${process.env.KEY_STYLE === 'new' ? 'publishable' : 'anon'} key + moonshots-style URL`, okCfg.anonKey === KEYS.anon && okCfg.supabaseUrl === env.SUPABASE_URL);
 
   const external = [...hosts].filter((h) => !['localhost:8787', 'fonts.googleapis.com', 'fonts.gstatic.com'].includes(h));
   const loaded = await page.evaluate(async () => { await document.fonts.ready; return [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replace(/"/g, '')); });

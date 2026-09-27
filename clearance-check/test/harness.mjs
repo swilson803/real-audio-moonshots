@@ -29,11 +29,17 @@ const ASSETS = {
   },
 };
 
-const env = {
+// KEY_STYLE=new uses sb_publishable_/sb_secret_ keys (not JWTs) under the
+// new secret names; default is legacy anon/service_role JWTs.
+export const KEYS = process.env.KEY_STYLE === 'new'
+  ? { anon: 'sb_publishable_test', service: 'sb_secret_test' }
+  : { anon: 'eyJanon.test', service: 'eyJservice.test' };
+export const env = {
   ASSETS,
   SUPABASE_URL: `${ORIGIN}/mock-sb`,
-  SUPABASE_ANON_KEY: 'anon-test',
-  SUPABASE_SERVICE_ROLE_KEY: 'service-test',
+  ...(process.env.KEY_STYLE === 'new'
+    ? { SUPABASE_PUBLISHABLE_KEY: KEYS.anon, SUPABASE_SECRET_KEY: KEYS.service }
+    : { SUPABASE_ANON_KEY: KEYS.anon, SUPABASE_SERVICE_ROLE_KEY: KEYS.service }),
   RESEND_API_KEY: 're_test',
 };
 
@@ -60,8 +66,13 @@ function filters(params) {
 }
 
 async function mockSupabase(req, url, body) {
-  const role = req.headers.authorization === 'Bearer service-test' ? 'service' : req.headers.authorization === 'Bearer anon-test' ? 'anon' : null;
+  // Like the Supabase gateway: the key is read from apikey. A Bearer token must
+  // be a JWT (a non-JWT sb_ key as Bearer is rejected) matching that key.
+  const key = req.headers.apikey;
+  const role = key === KEYS.service ? 'service' : key === KEYS.anon ? 'anon' : null;
   if (!role) return [401, { error: 'no key' }];
+  const auth = req.headers.authorization;
+  if (auth && (!auth.startsWith('Bearer eyJ') || auth !== `Bearer ${key}`)) return [401, { error: 'Invalid JWT' }];
   const path = url.pathname.replace('/mock-sb', '');
 
   if (path.startsWith('/storage/v1/object/clearance-uploads/') && req.method === 'POST') {

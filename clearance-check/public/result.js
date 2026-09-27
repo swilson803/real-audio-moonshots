@@ -1,4 +1,4 @@
-import { PLATFORMS, getConfig, verdictFor } from './lib.js';
+import { PLATFORMS, getConfig, supabaseHeaders, verdictFor } from './lib.js';
 
 const POLL_MS = 4000;
 const id = decodeURIComponent(location.pathname.split('/')[2] || '');
@@ -88,7 +88,7 @@ async function poll() {
     const res = await fetch(
       `${supabaseUrl}/rest/v1/submissions?id=eq.${encodeURIComponent(id)}` +
         '&select=status,original_filename,emailed_at,youtube_result,youtube_note,tiktok_result,tiktok_note,instagram_result,instagram_note',
-      { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}`, 'x-submission-id': id }, cache: 'no-store' },
+      { headers: { ...supabaseHeaders(anonKey), 'x-submission-id': id }, cache: 'no-store' },
     );
     if (!res.ok) throw new Error(`select ${res.status}`);
     const [row] = await res.json();

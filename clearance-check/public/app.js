@@ -1,4 +1,4 @@
-import { BUCKET, TYPES, getConfig, validateEmail, validateFile } from './lib.js';
+import { BUCKET, TYPES, getConfig, supabaseHeaders, validateEmail, validateFile } from './lib.js';
 
 const form = document.getElementById('check-form');
 const fileInput = document.getElementById('file');
@@ -48,7 +48,7 @@ form.addEventListener('submit', async (e) => {
     const ext = file.name.split('.').pop().toLowerCase();
     const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-120) || `upload.${ext}`;
     const objectName = `${id}/${safeName}`;
-    const auth = { apikey: anonKey, Authorization: `Bearer ${anonKey}` };
+    const auth = supabaseHeaders(anonKey);
 
     const up = await fetch(`${supabaseUrl}/storage/v1/object/${BUCKET}/${objectName}`, {
       method: 'POST',
@@ -67,7 +67,9 @@ form.addEventListener('submit', async (e) => {
     window.location.assign(`/r/${id}`);
   } catch (err) {
     console.error(err);
-    formError.textContent = 'Something went wrong uploading. Try again.';
+    formError.textContent = err.message === 'config'
+      ? 'Uploads aren’t available right now. Try again later.'
+      : 'Something went wrong uploading. Try again.';
     submit.disabled = false;
     submit.textContent = 'CHECK MY TRACK';
   }

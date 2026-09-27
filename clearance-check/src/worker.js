@@ -8,6 +8,7 @@
 // Supabase: the moonshots project (kucwpmtkctafzkivuqtu) ONLY. Never production.
 
 import { sendResultEmail } from './email.js';
+import { supabaseHeaders } from '../public/lib.js';
 
 const MOONSHOTS_REF = 'kucwpmtkctafzkivuqtu';
 const PRODUCTION_REF = 'uprfsmwbsvzuoiyfgtgx';
@@ -26,12 +27,22 @@ function json(body, status = 200) {
   });
 }
 
+// Worker secrets. Either Supabase key style works: legacy anon / service_role
+// JWTs, or the newer publishable / secret keys under their own names.
+const anonKey = (env) => env.SUPABASE_ANON_KEY || env.SUPABASE_PUBLISHABLE_KEY;
+const serviceKey = (env) => env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY;
+
+// Names (never values) of the secrets a route still needs, for a clear 503.
+function missing(env, needs) {
+  const out = [];
+  if (needs.includes('anon') && !anonKey(env)) out.push('SUPABASE_ANON_KEY');
+  if (needs.includes('service') && !serviceKey(env)) out.push('SUPABASE_SERVICE_ROLE_KEY');
+  if (needs.includes('resend') && !env.RESEND_API_KEY) out.push('RESEND_API_KEY');
+  return out;
+}
+
 function serviceHeaders(env) {
-  return {
-    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-    'Content-Type': 'application/json',
-  };
+  return { ...supabaseHeaders(serviceKey(env)), 'Content-Type': 'application/json' };
 }
 
 // Claim the row by setting emailed_at only where status = done and emailed_at
@@ -91,12 +102,14 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/api/config' && request.method === 'GET') {
-      if (!env.SUPABASE_ANON_KEY) return json({ error: 'not configured' }, 500);
-      return json({ supabaseUrl: supabaseUrl(env), anonKey: env.SUPABASE_ANON_KEY });
+      const need = missing(env, ['anon']);
+      if (need.length) return json({ error: 'not configured', missing: need }, 503);
+      return json({ supabaseUrl: supabaseUrl(env), anonKey: anonKey(env) });
     }
 
     if (url.pathname === '/api/notify' && request.method === 'POST') {
-      if (!env.SUPABASE_SERVICE_ROLE_KEY || !env.RESEND_API_KEY) return json({ error: 'not configured' }, 500);
+      const need = missing(env, ['service', 'resend']);
+      if (need.length) return json({ error: 'not configured', missing: need }, 503);
       let id;
       try {
         ({ id } = await request.json());
@@ -123,7 +136,7 @@ export default {
   },
 
   async scheduled(_event, env, ctx) {
-    if (!env.SUPABASE_SERVICE_ROLE_KEY || !env.RESEND_API_KEY) return;
+    if (missing(env, ['service', 'resend']).length) return;
     ctx.waitUntil(sweep(env).then((r) => console.log('sweep', JSON.stringify(r))));
   },
 };

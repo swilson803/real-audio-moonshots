@@ -4,7 +4,9 @@
 //
 // Secrets (set on the Worker, never committed):
 //   SUPABASE_ANON_KEY          moonshots anon key (public, sent to the browser)
+//                              or SUPABASE_PUBLISHABLE_KEY (sb_publishable_...)
 //   SUPABASE_SERVICE_ROLE_KEY  moonshots service role key (server only)
+//                              or SUPABASE_SECRET_KEY (sb_secret_...)
 //   RESEND_API_KEY             Resend key
 // Optional vars: SITE_URL (needed for the cron sweep's result links), EMAIL_FROM.
 {

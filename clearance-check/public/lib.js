@@ -10,6 +10,14 @@ export const BUCKET = 'clearance-uploads';
 // allowed_mime_types (audio/mpeg, audio/wav, audio/mp4, ...) always match.
 export const TYPES = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4' };
 
+// Supabase key headers. A legacy anon/service_role key is a JWT and goes in
+// both apikey and Authorization. The newer sb_publishable_/sb_secret_ keys are
+// not JWTs: sending one as a Bearer token is rejected, so they go in apikey
+// only and the API gateway supplies the role.
+export function supabaseHeaders(key) {
+  return key.startsWith('eyJ') ? { apikey: key, Authorization: `Bearer ${key}` } : { apikey: key };
+}
+
 export const PLATFORMS = [
   { key: 'youtube', name: 'YouTube' },
   { key: 'tiktok', name: 'TikTok' },
