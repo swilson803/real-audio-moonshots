@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=ms002-r5">
 </head>
 <body>
   <div class="page surface-sketched">
@@ -36,10 +36,9 @@
           <form id="check-form" class="my-login-modal check-form" novalidate>
             <div class="field">
               <span class="field-label" id="file-label">Audio file</span>
-              <input class="file-input" type="file" id="file" name="file"
+              <label class="btn-primary-cta btn-block file-pick" id="file-pick">CHOOSE FILE<input class="file-input" type="file" id="file" name="file"
                      accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a"
-                     aria-labelledby="file-label" aria-describedby="file-hint file-error">
-              <label class="btn-primary-cta btn-block file-pick" id="file-pick" for="file">CHOOSE FILE</label>
+                     aria-labelledby="file-label" aria-describedby="file-hint file-error"></label>
               <p class="file-name" id="file-name">No file chosen</p>
               <p class="text-caption text-mono field-hint file-hint" id="file-hint">MP3, WAV, or M4A.</p>
               <p class="text-label field-error file-error" id="file-error" role="alert"></p>
@@ -62,6 +61,6 @@
       </div>
     </main>
   </div>
-  <script src="/app.js" type="module"></script>
+  <script src="/app.js?v=ms002-r5" type="module"></script>
 </body>
 </html>

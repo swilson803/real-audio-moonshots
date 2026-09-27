@@ -53,12 +53,23 @@ try {
   check('landing shows the permanent warning', await page.isVisible('.landing-warning .warning')
     && /reflects right now/.test(landingWarning) && /any rightsholder can turn on enforcement at any time/i.test(landingWarning), landingWarning);
   check('file selection is a sketched button, not a text input',
-    await page.$eval('#file-pick', (el) => el.textContent === 'CHOOSE FILE' && el.classList.contains('btn-primary-cta') && !el.classList.contains('input-text')));
+    await page.$eval('#file-pick', (el) => el.textContent.trim() === 'CHOOSE FILE' && el.classList.contains('btn-primary-cta') && !el.classList.contains('input-text')));
   const rest = await page.$eval('#file-pick', (el) => getComputedStyle(el).color);
-  await page.hover('#file-pick');
-  await page.waitForTimeout(250);
+  const box = await page.locator('#file-pick').boundingBox();
+  const clip = { x: box.x - 24, y: box.y - 24, width: box.width + 48, height: box.height + 48 };
+  const restShot = await page.screenshot({ clip });
+  await page.screenshot({ path: `${SHOTS}choose-file-rest-1280.jpg`, clip, quality: 90 });
+  // Real mouse, screenshot in the same frame (no wait): must already differ.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const hoverShot = await page.screenshot({ clip });
+  await page.screenshot({ path: `${SHOTS}choose-file-hover-1280.jpg`, clip, quality: 90 });
   const hov = await page.$eval('#file-pick', (el) => ({ c: getComputedStyle(el).color, t: getComputedStyle(el).transform, f: getComputedStyle(el).filter }));
-  check('CHOOSE FILE red at rest, only expands on hover', rest === 'rgb(229, 90, 60)' && hov.c === rest && hov.t.startsWith('matrix(1.02') && hov.f === 'none', `${rest} -> ${JSON.stringify(hov)}`);
+  check('CHOOSE FILE red at rest, only expands on hover', rest === 'rgb(229, 90, 60)' && hov.c === rest && hov.t === 'matrix(1.04, 0, 0, 1.04, 0, 0)' && hov.f === 'none', `${rest} -> ${JSON.stringify(hov)}`);
+  check('hover screenshot differs from rest (not byte-identical)', !restShot.equals(hoverShot));
+  await page.mouse.move(0, 0);
+  // Hovering the file input itself (e.g. found by its "Audio file" label) grows the button too.
+  await page.locator('#file').hover({ force: true });
+  check('hovering the file input also grows the button', (await page.$eval('#file-pick', (el) => getComputedStyle(el).transform)) === 'matrix(1.04, 0, 0, 1.04, 0, 0)');
   await page.mouse.move(0, 0);
   await page.waitForTimeout(250);
   check('line under the logo', await page.isVisible('nav .nav-line'));
