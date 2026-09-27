@@ -1,0 +1,34 @@
+// Root Wrangler config, for Cloudflare Workers Builds while its Root directory
+// is `/`. It serves the clearance-check experiment (MS-002); paths point into
+// clearance-check/. Keep in sync with clearance-check/wrangler.jsonc, which is
+// used once Builds root is set to clearance-check.
+//
+// Secrets (set on the Worker, never committed): SUPABASE_ANON_KEY,
+// SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY. Optional vars: SITE_URL, EMAIL_FROM.
+{
+  "name": "clearance-check",
+  "main": "clearance-check/src/worker.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./clearance-check/public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/r/*"]
+  },
+  "vars": {
+    // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).
+    "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co"
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "observability": { "enabled": true },
+  // Required by `wrangler preview`. Vars are not inherited, so the moonshots
+  // URL is repeated; no cron in previews, so a preview never emails on its own.
+  "previews": {
+    "vars": {
+      // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).
+      "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co"
+    },
+    "observability": { "enabled": true }
+  }
+}
