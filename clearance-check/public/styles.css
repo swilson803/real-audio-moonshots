@@ -353,27 +353,55 @@ h1, h2, h3, p { margin: 0; }
 .file-pick:has(.file-input:focus-visible) { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; }
 .file-name { font-family: var(--font-mono); font-size: 14px; word-break: break-all; margin-top: 6px; }
 .file-pick:not(.has-file) + .file-name { color: rgba(26, 26, 26, 0.8); }
-/* Selected: button label shifts to FILE UPLOADED; filename is larger/bolder so selection is obvious. */
+/* Selected: button label shifts to FILE UPLOADED; filename brand red + drawn font (Reject8). */
 .file-pick.has-file + .file-name {
-  color: var(--color-black);
+  color: var(--color-red);
+  font-family: var(--font-display);
   font-size: 16px;
   font-weight: 600;
   margin-top: 10px;
 }
 
+
+/* Reject8: all UI copy uses the same drawn-style font (Patrick Hand / --font-display).
+   Overrides Inter/mono from the COPIED Creator block for this experiment only. */
+.page .btn-default,
+.page .btn-primary-cta,
+.page .input-text,
+.page .file-name,
+.page .file-hint,
+.page .platform-status,
+.page .platform-note,
+.page .text-mono {
+  font-family: var(--font-display);
+}
 .actions { display: flex; justify-content: center; padding-top: 8px; }
 
 /* Result page */
 .platforms { list-style: none; margin: 0; padding: 0; }
-.platform { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 16px; padding: 12px 0; }
+.platform { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 16px; padding: 12px 0; }
 .platform + .platform { border-top: 0; }
-.platform-name { font-size: 24px; }
-.platform-status { font-family: var(--font-mono); font-size: 14px; }
-.platform-status[data-result="clear"] { color: var(--color-black); }
+.platform-label { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.platform-icon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  /* Spencer: start black (true black, not CF grey inactive) */
+  filter: brightness(0) saturate(100%);
+}
+/* Cleared → brand red (~#E55A3C); exact ACTIVE chain from Creator-Facing socialLinks.ts */
+.platform[data-result="clear"] .platform-icon {
+  filter: brightness(0) saturate(100%) invert(52%) sepia(73%) saturate(2392%) hue-rotate(338deg) brightness(96%) contrast(91%);
+}
+.platform-name { font-size: 24px; color: var(--color-black); }
+.platform[data-result="clear"] .platform-name { color: var(--color-red); }
+.platform-status { font-size: 14px; }
+.platform-status[data-result="clear"] { color: var(--color-red); }
 .platform-status[data-result="claimed"],
 .platform-status[data-result="muted"],
 .platform-status[data-result="error"] { color: var(--color-red); }
-.platform-note { flex-basis: 100%; font-family: var(--font-mono); font-size: 12px; color: rgba(26, 26, 26, 0.8); }
+.platform-status[data-result="pending"] { color: var(--color-black); }
+.platform-note { flex-basis: 100%; font-size: 12px; color: rgba(26, 26, 26, 0.8); }
 .platform-note:empty { display: none; }
 .verdict { font-size: 28px; line-height: 1.2; text-align: center; }
 .verdict[data-flagged="true"] { color: var(--color-red); }

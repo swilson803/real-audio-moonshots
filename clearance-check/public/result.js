@@ -29,7 +29,14 @@ for (const p of PLATFORMS) {
   }
   const li = document.createElement('li');
   li.className = 'platform';
-  li.innerHTML = `<span class="platform-name"></span><span class="platform-status"></span><span class="platform-note"></span>`;
+  li.dataset.result = 'pending';
+  li.innerHTML =
+    `<span class="platform-label">` +
+      `<img class="platform-icon" src="/icons-runtime/platform-${p.key}.webp" alt="" width="28" height="28">` +
+      `<span class="platform-name"></span>` +
+    `</span>` +
+    `<span class="platform-status"></span>` +
+    `<span class="platform-note"></span>`;
   li.querySelector('.platform-name').textContent = p.name;
   list.appendChild(li);
   rows[p.key] = li;
@@ -41,10 +48,12 @@ function render(row) {
   platformsBox.hidden = false;
   for (const p of PLATFORMS) {
     const result = row[`${p.key}_result`];
-    const status = rows[p.key].querySelector('.platform-status');
+    const li = rows[p.key];
+    li.dataset.result = result || 'pending';
+    const status = li.querySelector('.platform-status');
     status.dataset.result = result;
     status.textContent = result === 'pending' && row.status === 'queued' ? 'Queued' : LABEL[result] || result;
-    rows[p.key].querySelector('.platform-note').textContent = row[`${p.key}_note`] || '';
+    li.querySelector('.platform-note').textContent = row[`${p.key}_note`] || '';
   }
 
   const allIn = PLATFORMS.every((p) => row[`${p.key}_result`] !== 'pending');

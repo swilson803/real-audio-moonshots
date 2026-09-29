@@ -91,6 +91,14 @@ try {
     (await page.$eval('#file-pick .file-pick-label', (el) => el.textContent.trim())) === 'FILE UPLOADED'
     && (await page.$eval('#file-pick', (el) => el.classList.contains('has-file')))
     && (await page.textContent('#file-name')) === 'big.mp3');
+  const fileNameColor = await page.$eval('#file-name', (el) => getComputedStyle(el).color);
+  check('uploaded filename is brand red', fileNameColor === 'rgb(229, 90, 60)', fileNameColor);
+  const displayFont = await page.$eval('#file-name', (el) => getComputedStyle(el).fontFamily);
+  check('uploaded filename uses drawn display font', /Patrick Hand/i.test(displayFont), displayFont);
+  const landingFonts = await page.$$eval('.lead, .field-label, .file-hint, #submit, #file-name', (els) =>
+    els.map((e) => ({ t: (e.textContent || '').slice(0, 24), f: getComputedStyle(e).fontFamily })));
+  check('landing UI copy uses drawn display font',
+    landingFonts.every((x) => /Patrick Hand/i.test(x.f)), JSON.stringify(landingFonts));
   await page.fill('#email', 'a@b.co');
   await page.click('#submit');
   await page.waitForFunction(() => /too large/.test(document.getElementById('file-error').textContent), null, { timeout: 30000 });
@@ -127,8 +135,38 @@ try {
   page.on('framenavigated', () => navs++);
   await update({ id, status: 'checking', youtube_result: 'clear', youtube_note: 'no match' });
   await page.waitForFunction(() => [...document.querySelectorAll('.platform-status')][0].textContent === 'Clear', null, { timeout: 10000 });
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.platform[data-result="clear"] .platform-name');
+    return el && getComputedStyle(el).color === 'rgb(229, 90, 60)';
+  }, null, { timeout: 5000 });
   const mid = await page.$$eval('.platform-status', (els) => els.map((e) => e.textContent));
   check('polls and updates without reload', navs === 0 && mid[0] === 'Clear' && mid[1] === 'Checking…', mid.join(' / '));
+  const iconSrcs = await page.$$eval('.platform-icon', (els) => els.map((e) => e.getAttribute('src')));
+  check('drawn platform icons next to labels',
+    iconSrcs.join() === '/icons-runtime/platform-youtube.webp,/icons-runtime/platform-tiktok.webp,/icons-runtime/platform-instagram.webp',
+    iconSrcs.join(' | '));
+  const clearStyle = await page.$eval('.platform[data-result="clear"]', (el) => ({
+    name: getComputedStyle(el.querySelector('.platform-name')).color,
+    filter: getComputedStyle(el.querySelector('.platform-icon')).filter,
+  }));
+  const pendingStyle = await page.$eval('.platform[data-result="pending"]', (el) => ({
+    name: getComputedStyle(el.querySelector('.platform-name')).color,
+    filter: getComputedStyle(el.querySelector('.platform-icon')).filter,
+  }));
+  check('cleared platform name+icon brand red',
+    clearStyle.name === 'rgb(229, 90, 60)'
+    && /invert\(0?\.52\)|invert\(52%\)/.test(clearStyle.filter)
+    && /sepia\(0?\.73\)|sepia\(73%\)/.test(clearStyle.filter)
+    && /hue-rotate\(338deg\)/.test(clearStyle.filter),
+    JSON.stringify(clearStyle));
+  check('uncleared platform name+icon stay black',
+    pendingStyle.name === 'rgb(26, 26, 26)'
+    && /brightness\(0\)/.test(pendingStyle.filter) && !/invert\(52%\)/.test(pendingStyle.filter),
+    JSON.stringify(pendingStyle));
+  const resultFonts = await page.$$eval('.lead, .platform-name, .platform-status, .warning, .verdict, a.btn-default', (els) =>
+    els.filter(Boolean).map((e) => getComputedStyle(e).fontFamily));
+  check('result UI copy uses drawn display font',
+    resultFonts.length > 0 && resultFonts.every((f) => /Patrick Hand/i.test(f)), resultFonts.join(' || '));
   check('no verdict before all three', !(await page.isVisible('#verdict')));
   check('warning visible while checking', await warning());
   check('no email before done', (await state()).emails.length === 0);
@@ -219,8 +257,10 @@ try {
 
   const external = [...hosts].filter((h) => !['localhost:8787', 'fonts.googleapis.com', 'fonts.gstatic.com'].includes(h));
   const loaded = await page.evaluate(async () => { await document.fonts.ready; return [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replace(/"/g, '')); });
-  const fontsOk = ['Patrick Hand', 'Inter', 'Sometype Mono'].every((f) => loaded.includes(f));
-  check('Patrick Hand + Inter + Sometype Mono loaded', fontsOk, [...new Set(loaded)].join(', '));
+  // Reject8 uses Patrick Hand for UI copy; Inter/Mono stay linked for brand parity but may not
+  // appear in document.fonts if unused. Require Patrick Hand; note others.
+  const fontsOk = loaded.includes('Patrick Hand');
+  check('Patrick Hand loaded (drawn UI font)', fontsOk, [...new Set(loaded)].join(', '));
   check('browser requests only app/Supabase(+Google Fonts)', external.length === 0, [...hosts].join(', '));
 } finally {
   await browser.close();
