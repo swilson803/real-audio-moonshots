@@ -3,3 +3,6 @@ node_modules/
 .dev.vars
 test/big*.mp3
 test/big*.wav
+bot/clips/
+bot/__pycache__/
+bot/*.pyc

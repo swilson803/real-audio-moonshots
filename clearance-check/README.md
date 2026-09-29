@@ -27,3 +27,8 @@ Optional vars: `SITE_URL` (required for the cron sweep's links), `EMAIL_FROM`
 `npm test` runs `test/e2e.mjs`: the Worker on Node with a fake Supabase and fake
 Resend (no network, no real project), driven by Playwright. Screenshots land in
 `docs/screenshots/`.
+
+## Catalogue Bot tooling (MS-003)
+`bot/` — pull the oldest queued submission into a 61s black-screen test clip and
+record per-platform results (`checking` → `done` after all three). Moonshots
+Supabase only; refuses production. See `bot/README.md`.
