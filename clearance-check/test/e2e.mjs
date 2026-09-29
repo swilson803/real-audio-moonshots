@@ -47,8 +47,9 @@ try {
   // Bad type / size rejected inline, nothing uploaded.
   await page.goto(ORIGIN);
   check('headline + lead copy (Spencer notes, verbatim)',
-    (await page.textContent('h1')) === 'Music Copyright Tester'
-    && (await page.textContent('.lead')) === 'Let us test the track first so you can avoid havng your content muted or demonitized.');
+    (await page.$eval('h1.headline img.headline-img', (el) => el.getAttribute('alt'))) === 'Music Copyright Tester'
+    && (await page.isVisible('h1.headline img.headline-img'))
+    && (await page.textContent('.lead')) === 'Let us test the track first so you can avoid having your content muted or demonitized.');
   const landingWarning = await page.textContent('.landing-warning .warning');
   check('landing shows the permanent warning', await page.isVisible('.landing-warning .warning')
     && /reflects right now/.test(landingWarning) && /any rightsholder can turn on enforcement at any time/i.test(landingWarning), landingWarning);
@@ -67,7 +68,7 @@ try {
   check('CHOOSE FILE red at rest, only expands on hover', rest === 'rgb(229, 90, 60)' && hov.c === rest && hov.t === 'matrix(1.04, 0, 0, 1.04, 0, 0)' && hov.f === 'none', `${rest} -> ${JSON.stringify(hov)}`);
   check('hover screenshot differs from rest (not byte-identical)', !restShot.equals(hoverShot));
   await page.mouse.move(0, 0);
-  // Hovering the file input itself (e.g. found by its "Audio file" label) grows the button too.
+  // Hovering the file input itself grows the button too.
   await page.locator('#file').hover({ force: true });
   check('hovering the file input also grows the button', (await page.$eval('#file-pick', (el) => getComputedStyle(el).transform)) === 'matrix(1.04, 0, 0, 1.04, 0, 0)');
   await page.mouse.move(0, 0);

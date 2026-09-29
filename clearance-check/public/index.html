@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=ms002-r5">
+  <link rel="stylesheet" href="/styles.css?v=ms002-r6">
 </head>
 <body>
   <div class="page surface-sketched">
@@ -26,8 +26,8 @@
     <main class="main">
       <div class="container">
         <div class="narrow">
-          <h1 class="text-h1 headline">Music Copyright Tester</h1>
-          <p class="lead">Let us test the track first so you can avoid havng your content muted or demonitized.</p>
+          <h1 class="headline"><img class="headline-img" src="/brand-assets/logo/music-copyright-tester.png" alt="Music Copyright Tester" width="1967" height="261"></h1>
+          <p class="lead">Let us test the track first so you can avoid having your content muted or demonitized.</p>
 
           <div class="box-sketched-light-red landing-warning" role="note">
             <p class="warning">This reflects right now. Any rightsholder can turn on enforcement at any time, so a clear result today can change later.</p>
@@ -35,10 +35,9 @@
 
           <form id="check-form" class="my-login-modal check-form" novalidate>
             <div class="field">
-              <span class="field-label" id="file-label">Audio file</span>
               <label class="btn-primary-cta btn-block file-pick" id="file-pick">CHOOSE FILE<input class="file-input" type="file" id="file" name="file"
                      accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a"
-                     aria-labelledby="file-label" aria-describedby="file-hint file-error"></label>
+                     aria-label="Choose audio file" aria-describedby="file-hint file-error"></label>
               <p class="file-name" id="file-name">No file chosen</p>
               <p class="text-caption text-mono field-hint file-hint" id="file-hint">MP3, WAV, or M4A.</p>
               <p class="text-label field-error file-error" id="file-error" role="alert"></p>
@@ -61,6 +60,6 @@
       </div>
     </main>
   </div>
-  <script src="/app.js?v=ms002-r5" type="module"></script>
+  <script src="/app.js?v=ms002-r6" type="module"></script>
 </body>
 </html>

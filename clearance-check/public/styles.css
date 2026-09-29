@@ -312,6 +312,10 @@ h1, h2, h3, p { margin: 0; }
 
 /* Headline → subhead mb-8 md:mb-10; lead text-xl md:text-2xl text-black/90 */
 .headline { color: var(--color-red); text-align: center; margin-bottom: 12px; }
+/* Headline image: replaces text-h1 "Music Copyright Tester"; height matches prior 40/64 text scale. */
+.headline-img { display: block; margin: 0 auto; height: 44px; width: auto; max-width: 100%; }
+@media (min-width: 768px) { .headline-img { height: 72px; } }
+
 .lead { font-size: 20px; line-height: 1.625; color: rgba(26, 26, 26, 0.9); text-align: center; margin-bottom: 32px; }
 @media (min-width: 768px) { .lead { font-size: 24px; margin-bottom: 40px; } }
 
@@ -328,7 +332,7 @@ h1, h2, h3, p { margin: 0; }
 .check-form > * + * { margin-top: 12px; }
 .field { margin: 0 -19px; transform: translateX(10px); }
 .field .input-text { margin-left: -10px; margin-top: -2px; }
-.field-label { display: block; font-size: 14px; font-weight: 500; line-height: 1; margin-bottom: 0; }
+.field-label { display: block; font-size: 20px; font-weight: 500; line-height: 1; margin-bottom: 4px; }
 .field-hint { color: rgba(26, 26, 26, 0.8); margin-top: 2px; }
 .field-error { color: var(--color-red); margin-top: 2px; }
 .field-error:empty { display: none; }
