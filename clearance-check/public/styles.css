@@ -378,16 +378,37 @@ h1, h2, h3, p { margin: 0; }
 .actions { display: flex; justify-content: center; padding-top: 8px; }
 
 /* Result page */
+/* Reject10: summary text width matches warning/platform card content (border 18 + pad 16). */
+#summary.lead {
+  padding-left: calc(18px + var(--space-4));
+  padding-right: calc(18px + var(--space-4));
+}
 .platforms { list-style: none; margin: 0; padding: 0; }
 .platform { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 16px; padding: 12px 0; }
 .platform + .platform { border-top: 0; }
-.platform-label { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+/* Reject10: less outer gap above YouTube / below Instagram */
+#platforms-box {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+.platform:first-child { padding-top: 4px; }
+.platform:last-child { padding-bottom: 4px; }
+/* Reject10: fixed icon column so names share a left edge (YT ~42px at h=28) */
+.platform-label {
+  display: inline-grid;
+  grid-template-columns: 42px auto;
+  align-items: center;
+  column-gap: 10px;
+  min-width: 0;
+}
 .platform-icon {
   /* Reject9: fixed height, width auto — keep natural aspect (YT is wider than TT/IG) */
   height: 28px;
   width: auto;
+  max-width: 42px;
   flex-shrink: 0;
   display: block;
+  justify-self: start;
   /* Spencer: start black (true black, not CF grey inactive) */
   filter: brightness(0) saturate(100%);
 }

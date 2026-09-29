@@ -160,6 +160,47 @@ try {
   check('platform icons equal height with natural aspect',
     heightMatch && naturalAspect && yt && yt.w > yt.h,
     JSON.stringify(iconGeom));
+  // Reject10: summary width matches warning/platform card content; names left-aligned; tighter outer gaps
+  const layoutR10 = await page.evaluate(() => {
+    const summary = document.getElementById('summary');
+    const warning = document.querySelector('.box-sketched-light-red .warning');
+    const box = document.getElementById('platforms-box');
+    const plats = [...document.querySelectorAll('.platform')];
+    const names = [...document.querySelectorAll('.platform-name')];
+    const sr = summary.getBoundingClientRect();
+    const wr = warning.getBoundingClientRect();
+    const br = box.getBoundingClientRect();
+    const first = plats[0].getBoundingClientRect();
+    const last = plats[plats.length - 1].getBoundingClientRect();
+    const midGap = plats[1].getBoundingClientRect().top - first.bottom;
+    const nameLefts = names.map((n) => Math.round(n.getBoundingClientRect().left * 100) / 100);
+    const cs = getComputedStyle(summary);
+    const contentWidth = sr.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    return {
+      summaryContentW: Math.round(contentWidth * 100) / 100,
+      warningW: Math.round(wr.width * 100) / 100,
+      nameLefts,
+      gapAboveFirst: Math.round((first.top - br.top) * 100) / 100,
+      gapBelowLast: Math.round((br.bottom - last.bottom) * 100) / 100,
+      midGap: Math.round(midGap * 100) / 100,
+      boxPadTop: parseFloat(getComputedStyle(box).paddingTop),
+      firstPadTop: parseFloat(getComputedStyle(plats[0]).paddingTop),
+      lastPadBottom: parseFloat(getComputedStyle(plats[plats.length - 1]).paddingBottom),
+    };
+  });
+  check('summary content width matches warning text chunk',
+    Math.abs(layoutR10.summaryContentW - layoutR10.warningW) <= 2,
+    JSON.stringify(layoutR10));
+  check('platform names share a left edge',
+    layoutR10.nameLefts.every((l) => Math.abs(l - layoutR10.nameLefts[0]) <= 1),
+    JSON.stringify(layoutR10.nameLefts));
+  check('platforms outer gaps tightened above YT / below IG',
+    layoutR10.boxPadTop <= 10
+    && layoutR10.firstPadTop <= 6
+    && layoutR10.lastPadBottom <= 6
+    && layoutR10.gapAboveFirst < 28
+    && layoutR10.gapBelowLast < 28,
+    JSON.stringify(layoutR10));
   const againRest = await page.$eval('#again', (el) => ({
     text: el.textContent.trim(),
     cls: el.className,
