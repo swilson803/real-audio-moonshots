@@ -128,6 +128,71 @@ try {
   await page.waitForSelector('.platform-status');
   await page.waitForFunction(() => document.querySelector('.platform-status')?.textContent === 'Queued');
   check('warning visible while queued', await warning());
+  const queuedSummary = await page.textContent('#summary');
+  const queuedFoot = await page.textContent('#footnote');
+  check('queued status folds email note into the updates line',
+    /This page updates on its own\.\s+We.ll email you when all three are in\./.test(queuedSummary)
+    && (queuedFoot || '').trim() === '',
+    JSON.stringify({ queuedSummary, queuedFoot }));
+  // Reject9: icons same rendered height, natural aspect (YT wider than square TT/IG)
+  await page.waitForFunction(() => {
+    const imgs = [...document.querySelectorAll('.platform-icon')];
+    return imgs.length === 3 && imgs.every((img) => img.complete && img.naturalWidth > 0);
+  }, null, { timeout: 10000 });
+  const iconGeom = await page.$$eval('.platform-icon', (els) => els.map((el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      src: el.getAttribute('src'),
+      h: Math.round(r.height * 100) / 100,
+      w: Math.round(r.width * 100) / 100,
+      nw: el.naturalWidth,
+      nh: el.naturalHeight,
+    };
+  }));
+  const heights = iconGeom.map((g) => g.h);
+  const heightMatch = heights.every((h) => Math.abs(h - heights[0]) < 0.5);
+  const naturalAspect = iconGeom.every((g) => {
+    const expected = g.nw / g.nh;
+    const actual = g.w / g.h;
+    return Math.abs(expected - actual) < 0.05;
+  });
+  const yt = iconGeom.find((g) => /youtube/.test(g.src));
+  check('platform icons equal height with natural aspect',
+    heightMatch && naturalAspect && yt && yt.w > yt.h,
+    JSON.stringify(iconGeom));
+  const againRest = await page.$eval('#again', (el) => ({
+    text: el.textContent.trim(),
+    cls: el.className,
+    color: getComputedStyle(el).color,
+    border: getComputedStyle(el).borderImageSource,
+  }));
+  check('upload another track is primary CTA label',
+    againRest.text === 'upload another track' && againRest.cls.includes('btn-primary-cta'),
+    JSON.stringify(againRest));
+  check('upload another track red at rest',
+    againRest.color === 'rgb(229, 90, 60)' && /frame-button-heavy-red/.test(againRest.border),
+    JSON.stringify(againRest));
+  await page.locator('#again').scrollIntoViewIfNeeded();
+  const againBox = await page.locator('#again').boundingBox();
+  await page.mouse.move(againBox.x + againBox.width / 2, againBox.y + againBox.height / 2);
+  await page.waitForFunction(() => {
+    const el = document.getElementById('again');
+    return el && el.matches(':hover') && getComputedStyle(el).transform === 'matrix(1.04, 0, 0, 1.04, 0, 0)';
+  }, null, { timeout: 5000 });
+  const againHover = await page.$eval('#again', (el) => ({
+    color: getComputedStyle(el).color,
+    transform: getComputedStyle(el).transform,
+    filter: getComputedStyle(el).filter,
+    border: getComputedStyle(el).borderImageSource,
+    hover: el.matches(':hover'),
+  }));
+  await page.mouse.move(0, 0);
+  check('upload another track stays red and only scales on hover',
+    againHover.color === 'rgb(229, 90, 60)'
+    && /frame-button-heavy-red/.test(againHover.border)
+    && againHover.transform === 'matrix(1.04, 0, 0, 1.04, 0, 0)'
+    && (againHover.filter === 'none' || againHover.filter === ''),
+    JSON.stringify(againHover));
   await page.screenshot({ path: `${SHOTS}result-queued-1280.jpg`, fullPage: true, quality: 70 });
 
   // Poll reflects changes without reload.
@@ -141,6 +206,11 @@ try {
   }, null, { timeout: 5000 });
   const mid = await page.$$eval('.platform-status', (els) => els.map((e) => e.textContent));
   check('polls and updates without reload', navs === 0 && mid[0] === 'Clear' && mid[1] === 'Checking…', mid.join(' / '));
+  const checkingSummary = await page.textContent('#summary');
+  check('checking status folds email note into the updates line',
+    /Checking now\. This page updates on its own\.\s+We.ll email you when all three are in\./.test(checkingSummary)
+    && !(await page.textContent('#footnote') || '').trim(),
+    checkingSummary);
   const iconSrcs = await page.$$eval('.platform-icon', (els) => els.map((e) => e.getAttribute('src')));
   check('drawn platform icons next to labels',
     iconSrcs.join() === '/icons-runtime/platform-youtube.webp,/icons-runtime/platform-tiktok.webp,/icons-runtime/platform-instagram.webp',
@@ -163,7 +233,7 @@ try {
     pendingStyle.name === 'rgb(26, 26, 26)'
     && /brightness\(0\)/.test(pendingStyle.filter) && !/invert\(52%\)/.test(pendingStyle.filter),
     JSON.stringify(pendingStyle));
-  const resultFonts = await page.$$eval('.lead, .platform-name, .platform-status, .warning, .verdict, a.btn-default', (els) =>
+  const resultFonts = await page.$$eval('.lead, .platform-name, .platform-status, .warning, .verdict, a#again', (els) =>
     els.filter(Boolean).map((e) => getComputedStyle(e).fontFamily));
   check('result UI copy uses drawn display font',
     resultFonts.length > 0 && resultFonts.every((f) => /Patrick Hand/i.test(f)), resultFonts.join(' || '));
@@ -194,6 +264,21 @@ try {
   const again = await fetch(`${ORIGIN}/api/notify`, { method: 'POST', body: JSON.stringify({ id }) }).then((r) => r.json());
   await page.waitForTimeout(500);
   check('no resend on reload / repeat notify', (await state()).emails.length === 1 && again.sent === false);
+
+  // Reject9: upload another track autofills the email just used.
+  await page.waitForSelector('#again');
+  // Ensure session/href carries the email from the upload that landed here.
+  const againHref = await page.$eval('#again', (el) => el.getAttribute('href'));
+  check('upload another track href carries email query',
+    againHref === '/?email=creator%40example.com' || againHref === '/?email=' + encodeURIComponent('creator@example.com'),
+    againHref);
+  await Promise.all([page.waitForURL((u) => u.pathname === '/' || u.pathname === ''), page.click('#again')]);
+  await page.waitForSelector('#email');
+  const autofilled = await page.$eval('#email', (el) => el.value);
+  check('upload another track autofills prior email', autofilled === 'creator@example.com', autofilled);
+  // Return to a result page for remaining checks that reuse `page` + `id`.
+  await page.goto(`${ORIGIN}/r/${id}`);
+  await page.waitForSelector('#verdict-box:not([hidden])');
 
   // Concurrent notify on a fresh done row sends exactly one.
   const fresh = crypto.randomUUID();

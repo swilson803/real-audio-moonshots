@@ -383,9 +383,11 @@ h1, h2, h3, p { margin: 0; }
 .platform + .platform { border-top: 0; }
 .platform-label { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
 .platform-icon {
-  width: 28px;
+  /* Reject9: fixed height, width auto — keep natural aspect (YT is wider than TT/IG) */
   height: 28px;
+  width: auto;
   flex-shrink: 0;
+  display: block;
   /* Spencer: start black (true black, not CF grey inactive) */
   filter: brightness(0) saturate(100%);
 }
@@ -413,6 +415,15 @@ h1, h2, h3, p { margin: 0; }
 .center { text-align: center; }
 [hidden] { display: none !important; }
 a.btn-default, a.btn-primary-cta { text-decoration: none; }
+/* Reject9: result "upload another track" — red at rest + hover; only slight expand */
+.actions .btn-primary-cta:hover {
+  transform: scale(1.04);
+  filter: none;
+}
+.actions .btn-primary-cta:active {
+  transform: scale(0.98);
+  filter: none;
+}
 /* Error state inside the login-style form: the red search frame at the slice
    Creator uses for that asset (.input-text.error / .my-login-buttons: 210). */
 .my-login-modal .input-text.error,

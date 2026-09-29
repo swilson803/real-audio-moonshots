@@ -32,7 +32,7 @@ for (const p of PLATFORMS) {
   li.dataset.result = 'pending';
   li.innerHTML =
     `<span class="platform-label">` +
-      `<img class="platform-icon" src="/icons-runtime/platform-${p.key}.webp" alt="" width="28" height="28">` +
+      `<img class="platform-icon" src="/icons-runtime/platform-${p.key}.webp" alt="">` +
       `<span class="platform-name"></span>` +
     `</span>` +
     `<span class="platform-status"></span>` +
@@ -68,14 +68,17 @@ function render(row) {
 
   if (row.status === 'failed') {
     summary.textContent = 'The check didn’t finish. Try uploading again.';
+    footnote.textContent = '';
   } else if (row.status === 'done') {
     summary.textContent = row.original_filename ? `Results for ${row.original_filename}` : 'Results are in.';
     footnote.textContent = 'A copy is on its way to your email.';
   } else {
-    summary.textContent = row.status === 'queued'
+    // Reject9: fold email note into the status line (no separate footnote).
+    const base = row.status === 'queued'
       ? 'Your track is in line. This page updates on its own.'
       : 'Checking now. This page updates on its own.';
-    footnote.textContent = 'We’ll email you when all three are in.';
+    summary.textContent = base + ' We’ll email you when all three are in.';
+    footnote.textContent = '';
   }
 
   // The Worker sends the email once (status done + emailed_at null, then sets
@@ -118,4 +121,11 @@ if (!/^[0-9a-f-]{36}$/i.test(id)) {
   summary.textContent = 'We couldn’t find that check.';
 } else {
   poll();
+}
+
+const EMAIL_KEY = 'clearance-check-email';
+const again = document.getElementById('again');
+if (again) {
+  const saved = sessionStorage.getItem(EMAIL_KEY);
+  if (saved) again.href = `/?email=${encodeURIComponent(saved)}`;
 }

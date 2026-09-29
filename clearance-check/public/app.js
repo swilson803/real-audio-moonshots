@@ -10,6 +10,18 @@ const emailError = document.getElementById('email-error');
 const formError = document.getElementById('form-error');
 const submit = document.getElementById('submit');
 
+const EMAIL_KEY = 'clearance-check-email';
+
+// Reject9: prefill email from ?email= or the address just used on a prior check.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const fromQuery = params.get('email');
+  const fromSession = sessionStorage.getItem(EMAIL_KEY);
+  const seed = (fromQuery || fromSession || '').trim();
+  if (seed && !emailInput.value) emailInput.value = seed;
+})();
+
+
 function showFileError(msg) {
   fileError.textContent = msg || '';
 }
@@ -67,6 +79,7 @@ form.addEventListener('submit', async (e) => {
     });
     if (!ins.ok) throw new Error(`insert ${ins.status}`);
 
+    sessionStorage.setItem(EMAIL_KEY, email);
     window.location.assign(`/r/${id}`);
   } catch (err) {
     console.error(err);
