@@ -134,7 +134,8 @@ try {
     /This page updates on its own\.\s+We.ll email you when all three are in\./.test(queuedSummary)
     && (queuedFoot || '').trim() === '',
     JSON.stringify({ queuedSummary, queuedFoot }));
-  // Reject9: icons same rendered height, natural aspect (YT wider than square TT/IG)
+  // Reject9: icons natural aspect (YT wider than square TT/IG); YT/IG equal height
+  // Reject12: TikTok ~10% taller than YT/IG
   await page.waitForFunction(() => {
     const imgs = [...document.querySelectorAll('.platform-icon')];
     return imgs.length === 3 && imgs.every((img) => img.complete && img.naturalWidth > 0);
@@ -149,17 +150,20 @@ try {
       nh: el.naturalHeight,
     };
   }));
-  const heights = iconGeom.map((g) => g.h);
-  const heightMatch = heights.every((h) => Math.abs(h - heights[0]) < 0.5);
   const naturalAspect = iconGeom.every((g) => {
     const expected = g.nw / g.nh;
     const actual = g.w / g.h;
     return Math.abs(expected - actual) < 0.05;
   });
   const yt = iconGeom.find((g) => /youtube/.test(g.src));
-  check('platform icons equal height with natural aspect',
-    heightMatch && naturalAspect && yt && yt.w > yt.h,
+  const tt = iconGeom.find((g) => /tiktok/.test(g.src));
+  const ig = iconGeom.find((g) => /instagram/.test(g.src));
+  check('YT/IG icons equal height with natural aspect',
+    yt && ig && Math.abs(yt.h - ig.h) < 0.5 && naturalAspect && yt.w > yt.h,
     JSON.stringify(iconGeom));
+  check('TikTok icon ~10% taller than YT/IG',
+    tt && yt && Math.abs(tt.h / yt.h - 1.1) < 0.02,
+    JSON.stringify({ tt: tt && tt.h, yt: yt && yt.h, ratio: tt && yt && tt.h / yt.h }));
   // Reject10: summary width matches warning/platform card content; names left-aligned; tighter outer gaps
   const layoutR10 = await page.evaluate(() => {
     const summary = document.getElementById('summary');
