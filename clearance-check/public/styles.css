@@ -312,9 +312,8 @@ h1, h2, h3, p { margin: 0; }
 
 /* Headline → subhead mb-8 md:mb-10; lead text-xl md:text-2xl text-black/90 */
 .headline { color: var(--color-red); text-align: center; margin-bottom: 12px; }
-/* Headline image: replaces text-h1 "Music Copyright Tester"; height matches prior 40/64 text scale. */
-.headline-img { display: block; margin: 0 auto; height: 44px; width: auto; max-width: 100%; }
-@media (min-width: 768px) { .headline-img { height: 72px; } }
+/* Headline image: same width as lead/subheader in .narrow (Reject7). */
+.headline-img { display: block; margin: 0 auto; width: 100%; height: auto; max-width: 100%; }
 
 .lead { font-size: 20px; line-height: 1.625; color: rgba(26, 26, 26, 0.9); text-align: center; margin-bottom: 32px; }
 @media (min-width: 768px) { .lead { font-size: 24px; margin-bottom: 40px; } }
@@ -354,6 +353,13 @@ h1, h2, h3, p { margin: 0; }
 .file-pick:has(.file-input:focus-visible) { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; }
 .file-name { font-family: var(--font-mono); font-size: 14px; word-break: break-all; margin-top: 6px; }
 .file-pick:not(.has-file) + .file-name { color: rgba(26, 26, 26, 0.8); }
+/* Selected: button label shifts to FILE UPLOADED; filename is larger/bolder so selection is obvious. */
+.file-pick.has-file + .file-name {
+  color: var(--color-black);
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 10px;
+}
 
 .actions { display: flex; justify-content: center; padding-top: 8px; }
 

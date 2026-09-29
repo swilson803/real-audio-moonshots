@@ -18,10 +18,13 @@ function showEmailError(msg) {
   emailInput.classList.toggle('error', Boolean(msg));
 }
 
+const filePickLabel = filePick.querySelector('.file-pick-label');
+
 fileInput.addEventListener('change', () => {
   const file = fileInput.files[0];
   fileName.textContent = file ? file.name : 'No file chosen';
   filePick.classList.toggle('has-file', Boolean(file));
+  if (filePickLabel) filePickLabel.textContent = file ? 'FILE UPLOADED' : 'CHOOSE FILE';
   showFileError(file ? validateFile(file) : null);
 });
 emailInput.addEventListener('input', () => {

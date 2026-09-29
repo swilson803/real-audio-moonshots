@@ -54,7 +54,7 @@ try {
   check('landing shows the permanent warning', await page.isVisible('.landing-warning .warning')
     && /reflects right now/.test(landingWarning) && /any rightsholder can turn on enforcement at any time/i.test(landingWarning), landingWarning);
   check('file selection is a sketched button, not a text input',
-    await page.$eval('#file-pick', (el) => el.textContent.trim() === 'CHOOSE FILE' && el.classList.contains('btn-primary-cta') && !el.classList.contains('input-text')));
+    await page.$eval('#file-pick', (el) => el.querySelector('.file-pick-label')?.textContent.trim() === 'CHOOSE FILE' && el.classList.contains('btn-primary-cta') && !el.classList.contains('input-text')));
   const rest = await page.$eval('#file-pick', (el) => getComputedStyle(el).color);
   const box = await page.locator('#file-pick').boundingBox();
   const clip = { x: box.x - 24, y: box.y - 24, width: box.width + 48, height: box.height + 48 };
@@ -87,6 +87,10 @@ try {
   await writeFile(big, Buffer.alloc(60 * 1024 * 1024));
   await page.setInputFiles('#file', big);
   check('60 MB file passes page validation', (await page.textContent('#file-error')) === '' && (await page.textContent('#file-name')) === 'big.mp3');
+  check('file selected state is obvious (FILE UPLOADED + filename)',
+    (await page.$eval('#file-pick .file-pick-label', (el) => el.textContent.trim())) === 'FILE UPLOADED'
+    && (await page.$eval('#file-pick', (el) => el.classList.contains('has-file')))
+    && (await page.textContent('#file-name')) === 'big.mp3');
   await page.fill('#email', 'a@b.co');
   await page.click('#submit');
   await page.waitForFunction(() => /too large/.test(document.getElementById('file-error').textContent), null, { timeout: 30000 });
