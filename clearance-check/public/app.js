@@ -69,7 +69,17 @@ form.addEventListener('submit', async (e) => {
       headers: { ...auth, 'Content-Type': TYPES[ext], 'x-upsert': 'false' },
       body: file,
     });
-    if (up.status === 413) throw new Error('too-large');
+    // Reject13: real storage returns HTTP 400 + EntityTooLarge / statusCode 413 body
+    // (not always bare 413). Map both to the existing size inline copy.
+    const upBodyText = await up.text();
+    let upBody = {};
+    try { upBody = JSON.parse(upBodyText); } catch { /* non-JSON */ }
+    const overLimit = up.status === 413
+      || String(upBody.statusCode) === '413'
+      || upBody.code === 'EntityTooLarge'
+      || /payload too large|exceeded the maximum allowed size/i.test(upBodyText)
+      || /EntityTooLarge/i.test(upBodyText);
+    if (overLimit) throw new Error('too-large');
     if (!up.ok) throw new Error(`upload ${up.status}`);
 
     const ins = await fetch(`${supabaseUrl}/rest/v1/submissions`, {

@@ -80,7 +80,13 @@ async function mockSupabase(req, url, body) {
   if (path.startsWith('/storage/v1/object/clearance-uploads/') && req.method === 'POST') {
     const name = path.replace('/storage/v1/object/clearance-uploads/', '');
     if (!ALLOWED_MIME.includes(req.headers['content-type'])) return [400, { error: 'mime not allowed' }];
-    if (body.length > MAX) return [413, { error: 'too large' }];
+    // Reject13: match real Supabase storage oversize (HTTP 400 + EntityTooLarge body)
+    if (body.length > MAX) return [400, {
+      statusCode: '413',
+      error: 'Payload too large',
+      message: 'The object exceeded the maximum allowed size',
+      code: 'EntityTooLarge',
+    }];
     if (state.objects.has(name)) return [409, { error: 'exists' }];
     state.objects.set(name, body.length);
     return [200, { Key: `clearance-uploads/${name}` }];
