@@ -408,10 +408,13 @@ h1, h2, h3, p { margin: 0; }
   max-width: 42px;
   flex-shrink: 0;
   display: block;
-  justify-self: start;
+  /* Reject11: center each icon in the 42px column so glyph centers line up */
+  justify-self: center;
   /* Spencer: start black (true black, not CF grey inactive) */
   filter: brightness(0) saturate(100%);
 }
+/* Reject11: TikTok glyph sits ~1.3px high in its artwork; nudge to match YT/IG centers */
+.platform-icon[src*="tiktok"] { transform: translateY(1px); }
 /* Cleared → brand red (~#E55A3C); exact ACTIVE chain from Creator-Facing socialLinks.ts */
 .platform[data-result="clear"] .platform-icon {
   filter: brightness(0) saturate(100%) invert(52%) sepia(73%) saturate(2392%) hue-rotate(338deg) brightness(96%) contrast(91%);

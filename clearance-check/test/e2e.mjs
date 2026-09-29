@@ -201,6 +201,27 @@ try {
     && layoutR10.gapAboveFirst < 28
     && layoutR10.gapBelowLast < 28,
     JSON.stringify(layoutR10));
+  // Reject11: logo glyph centers (alpha bbox inside the artwork, as rendered) line up across rows
+  const glyphCenters = await page.$$eval('.platform-icon', (els) => els.map((el) => {
+    const c = document.createElement('canvas');
+    c.width = el.naturalWidth; c.height = el.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(el, 0, 0);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) {
+      if (d[(y * c.width + x) * 4 + 3] > 20) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    }
+    const r = el.getBoundingClientRect();
+    const row = el.closest('.platform-label').getBoundingClientRect();
+    return {
+      x: Math.round((r.left + ((x0 + x1) / 2 / c.width) * r.width) * 100) / 100,
+      dy: Math.round((r.top + ((y0 + y1) / 2 / c.height) * r.height - (row.top + row.bottom) / 2) * 100) / 100,
+    };
+  }));
+  check('platform logos centered/aligned with each other',
+    glyphCenters.every((g) => Math.abs(g.x - glyphCenters[0].x) <= 1 && Math.abs(g.dy - glyphCenters[0].dy) <= 1),
+    JSON.stringify(glyphCenters));
   const againRest = await page.$eval('#again', (el) => ({
     text: el.textContent.trim(),
     cls: el.className,
