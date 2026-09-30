@@ -1,9 +1,10 @@
-// Clearance Check Worker (MS-002).
-// Serves the static page (public/) and two small endpoints:
+// Clearance Check Worker (MS-002, MS-004).
+// Serves the static page (public/) and one endpoint:
 //   GET  /api/config  -> moonshots Supabase URL + anon key for the browser
-//   POST /api/notify  -> send the results email once (status done, emailed_at null)
-// A cron trigger runs the same send for any done row nobody has open, so the
-// email still goes out if the visitor closed the tab.
+// A 1-minute cron sends the results email once for every row whose status is
+// done and emailed_at is null, then leaves emailed_at set. It doesn't matter
+// who set the row to done (usually the Catalogue Bot with the service role),
+// and no page has to be open. The browser never triggers a send.
 //
 // Supabase: the moonshots project (kucwpmtkctafzkivuqtu) ONLY. Never production.
 
@@ -12,7 +13,6 @@ import { supabaseHeaders } from '../public/lib.js';
 
 const MOONSHOTS_REF = 'kucwpmtkctafzkivuqtu';
 const PRODUCTION_REF = 'uprfsmwbsvzuoiyfgtgx';
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Project ref inside a legacy JWT key (null for sb_ keys or garbage).
 function jwtRef(key) {
@@ -61,9 +61,8 @@ function serviceHeaders(env) {
 }
 
 // Claim the row by setting emailed_at only where status = done and emailed_at
-// is still null. Postgres applies the PATCH atomically, so concurrent callers
-// (two tabs, a reload, the cron) get the row back at most once, and only that
-// caller sends. If the send fails, release the claim so a later try can send.
+// is still null. Postgres applies the PATCH atomically, so overlapping sweeps
+// get the row back at most once, and only that caller sends. If the send fails, release the claim so a later try can send.
 export async function notifyOnce(env, id, siteUrl) {
   const base = supabaseUrl(env);
   const stamp = new Date().toISOString();
@@ -93,7 +92,10 @@ export async function notifyOnce(env, id, siteUrl) {
 }
 
 export async function sweep(env) {
-  if (!env.SITE_URL) return { skipped: 'SITE_URL not set' };
+  if (!env.SITE_URL) {
+    console.warn('sweep skipped: SITE_URL is not set, so result links cannot be built');
+    return { skipped: 'SITE_URL not set' };
+  }
   const base = supabaseUrl(env);
   const res = await fetch(
     `${base}/rest/v1/submissions?status=eq.done&emailed_at=is.null&select=id&order=created_at.asc&limit=25`,
@@ -122,24 +124,6 @@ export default {
       return json({ supabaseUrl: supabaseUrl(env), anonKey: anonKey(env) });
     }
 
-    if (url.pathname === '/api/notify' && request.method === 'POST') {
-      const need = missing(env, ['service', 'resend']);
-      if (need.length) return json({ error: 'not configured', missing: need }, 503);
-      let id;
-      try {
-        ({ id } = await request.json());
-      } catch {
-        return json({ error: 'bad request' }, 400);
-      }
-      if (typeof id !== 'string' || !UUID.test(id)) return json({ error: 'bad id' }, 400);
-      try {
-        return json(await notifyOnce(env, id, env.SITE_URL?.replace(/\/+$/, '') || url.origin));
-      } catch (err) {
-        console.error('notify failed', id, err.message);
-        return json({ error: 'send failed' }, 502);
-      }
-    }
-
     if (url.pathname.startsWith('/api/')) return json({ error: 'not found' }, 404);
 
     // /r/<id> is one static page; result.js reads the id from the path.
@@ -151,7 +135,11 @@ export default {
   },
 
   async scheduled(_event, env, ctx) {
-    if (missing(env, ['service', 'resend']).length) return;
+    const need = missing(env, ['service', 'resend']);
+    if (need.length) {
+      console.warn(`sweep skipped: missing ${need.join(', ')}`);
+      return;
+    }
     ctx.waitUntil(sweep(env).then((r) => console.log('sweep', JSON.stringify(r))));
   },
 };

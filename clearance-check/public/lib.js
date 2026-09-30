@@ -46,7 +46,7 @@ export function getConfig() {
   return configPromise;
 }
 
-// Verdict copy, shared shape with the Worker's email (src/verdict.js).
+// Verdict copy, shared with the Worker's results email (src/email.js).
 export function verdictFor(row) {
   const flagged = PLATFORMS.filter((p) => row[`${p.key}_result`] !== 'clear');
   if (flagged.length === 0) return { flagged: false, text: 'Looks clear on all three.' };

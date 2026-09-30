@@ -4,7 +4,8 @@
 // used once Builds root is set to clearance-check.
 //
 // Secrets (set on the Worker, never committed): SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY),
-// RESEND_API_KEY. Optional vars: SITE_URL, EMAIL_FROM.
+// RESEND_API_KEY. Var SITE_URL (the site's public origin, set on the Worker)
+// is required for the results email cron (MS-004); optional var EMAIL_FROM.
 {
   "name": "clearance-check",
   "main": "clearance-check/src/worker.js",

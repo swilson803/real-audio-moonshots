@@ -1,10 +1,10 @@
 // E2E against the local harness (fake Supabase + fake Resend). Walks the
-// MS-002 DONE WHEN lines and writes screenshots to test/screenshots/.
+// MS-002 and MS-004 DONE WHEN lines and writes screenshots to docs/screenshots/.
 import { createRequire } from 'node:module';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { start, env, KEYS, setBucketLimit } from './harness.mjs';
+import { start, env, KEYS, setBucketLimit, runCron, failResend } from './harness.mjs';
 
 const require = createRequire(import.meta.url);
 let chromium;
@@ -36,9 +36,23 @@ browser.newPage = ((orig) => async (...a) => {
     const type = u.includes('googleapis') ? 'text/css' : 'font/woff2';
     await route.fulfill({ status: 200, body: fontCache.get(u), headers: { 'Content-Type': type, 'Access-Control-Allow-Origin': '*' } });
   });
+  watchNotify(p);
   return p;
 })(browser.newPage);
 const hosts = new Set();
+// MS-004: the browser must never ask the Worker to send.
+const notifyCalls = [];
+const watchNotify = (p) => p.on('request', (r) => { if (new URL(r.url()).pathname === '/api/notify') notifyCalls.push(r.url()); });
+const SITE = env.SITE_URL;
+const insertRow = async (email, extra = {}) => {
+  const rid = crypto.randomUUID();
+  await fetch(`${ORIGIN}/mock-sb/rest/v1/submissions`, { method: 'POST', headers: { apikey: KEYS.anon }, body: JSON.stringify({ id: rid, email, storage_path: `clearance-uploads/${rid}/a.wav` }) });
+  if (Object.keys(extra).length) await update({ id: rid, ...extra });
+  return rid;
+};
+const ALL_CLEAR = { youtube_result: 'clear', tiktok_result: 'clear', instagram_result: 'clear' };
+const emailsTo = async (to) => (await state()).emails.filter((e) => e.to[0] === to);
+const rowOf = async (rid) => (await state()).rows.find((r) => r.id === rid);
 
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -306,8 +320,13 @@ try {
   check('no verdict before all three', !(await page.isVisible('#verdict')));
   check('warning visible while checking', await warning());
   check('no email before done', (await state()).emails.length === 0);
+  // MS-004: a row that isn't done sends nothing, however often the cron runs.
+  await runCron();
+  await runCron();
+  check('cron sends nothing for a checking row', (await state()).emails.length === 0 && (await rowOf(id)).emailed_at === null);
 
-  // Done row: per-platform results + verdict + one email.
+  // Done row: per-platform results + verdict on the page. The page itself
+  // never sends; only the cron does.
   await update({ id, status: 'done', tiktok_result: 'muted', tiktok_note: 'muted at 0:12', instagram_result: 'clear' });
   await page.waitForSelector('#verdict-box:not([hidden])', { timeout: 10000 });
   const done = await page.$$eval('.platform-status', (els) => els.map((e) => e.textContent));
@@ -316,20 +335,42 @@ try {
   check('verdict names flagged platform', verdict === 'Heads up: TikTok muted it.', verdict);
   check('warning visible when done', await warning());
   await page.waitForTimeout(500);
-  s = await state();
-  check('email sent once on done', s.emails.length === 1 && s.emails[0].to[0] === 'creator@example.com', `${s.emails.length} email(s)`);
-  check('email has verdict + result link', s.emails[0]?.html.includes('Heads up: TikTok muted it.') && s.emails[0]?.text.includes(`${ORIGIN}/r/${id}`));
-  check('emailed_at set', Boolean(s.rows.find((r) => r.id === id).emailed_at));
+  check('open result page on a done row sends nothing by itself', (await state()).emails.length === 0 && notifyCalls.length === 0);
   await page.screenshot({ path: `${SHOTS}result-done-flagged-1280.jpg`, fullPage: true, quality: 70 });
 
-  // Reloads never resend; direct notify calls no-op too.
-  await page.reload();
+  // MS-004: with no page open, the cron sends exactly one email.
+  await page.goto('about:blank');
+  await runCron();
+  s = await state();
+  const mail = s.emails[0];
+  check('cron sends exactly one email for the done row (no page open)', s.emails.length === 1 && mail.to.length === 1 && mail.to[0] === 'creator@example.com', `${s.emails.length} email(s)`);
+  check('email has the three platform results',
+    ['YouTube', 'TikTok', 'Instagram'].every((n) => mail.html.includes(n) && mail.text.includes(n))
+    && mail.text.includes('YouTube: Clear (no match)') && mail.text.includes('TikTok: Muted (muted at 0:12)') && mail.text.includes('Instagram: Clear')
+    && mail.html.includes('Muted') && mail.html.includes('muted at 0:12'), mail.text);
+  check('email has verdict + result link from SITE_URL',
+    mail.html.includes('Heads up: TikTok muted it.') && mail.html.includes(`href="${SITE}/r/${id}"`) && mail.text.includes(`${SITE}/r/${id}`));
+  check('email sends with Idempotency-Key', mail.idempotencyKey === `clearance-result:${id}`, mail.idempotencyKey);
+  check('emailed_at set', Boolean((await rowOf(id)).emailed_at));
+  const stamp = (await rowOf(id)).emailed_at;
+
+  // Done again, more cron runs, reloads: nothing more.
+  await update({ id, status: 'checking' });
+  await update({ id, status: 'done' });
+  await runCron();
+  await runCron();
+  await page.goto(`${ORIGIN}/r/${id}`);
   await page.waitForSelector('#verdict-box:not([hidden])');
   await page.reload();
   await page.waitForSelector('#verdict-box:not([hidden])');
-  const again = await fetch(`${ORIGIN}/api/notify`, { method: 'POST', body: JSON.stringify({ id }) }).then((r) => r.json());
+  await page.reload();
+  await page.waitForSelector('#verdict-box:not([hidden])');
   await page.waitForTimeout(500);
-  check('no resend on reload / repeat notify', (await state()).emails.length === 1 && again.sent === false);
+  await runCron();
+  check('done again / reloads / more cron runs send nothing more',
+    (await state()).emails.length === 1 && notifyCalls.length === 0 && (await rowOf(id)).emailed_at === stamp);
+  const nt = await fetch(`${ORIGIN}/api/notify`, { method: 'POST', body: JSON.stringify({ id }) });
+  check('/api/notify endpoint is gone', nt.status === 404);
 
   // Reject9: upload another track autofills the email just used.
   await page.waitForSelector('#again');
@@ -346,12 +387,76 @@ try {
   await page.goto(`${ORIGIN}/r/${id}`);
   await page.waitForSelector('#verdict-box:not([hidden])');
 
-  // Concurrent notify on a fresh done row sends exactly one.
-  const fresh = crypto.randomUUID();
-  await fetch(`${ORIGIN}/mock-sb/rest/v1/submissions`, { method: 'POST', headers: { apikey: KEYS.anon }, body: JSON.stringify({ id: fresh, email: 'x@example.com', storage_path: `clearance-uploads/${fresh}/a.wav` }) });
-  await update({ id: fresh, status: 'done', youtube_result: 'clear', tiktok_result: 'clear', instagram_result: 'clear' });
-  await Promise.all([1, 2, 3].map(() => fetch(`${ORIGIN}/api/notify`, { method: 'POST', body: JSON.stringify({ id: fresh }) })));
-  check('parallel notify sends once', (await state()).emails.filter((e) => e.to[0] === 'x@example.com').length === 1);
+  // Overlapping cron runs on a fresh done row send exactly one.
+  const fresh = await insertRow('x@example.com', { status: 'done', ...ALL_CLEAR });
+  await Promise.all([runCron(), runCron(), runCron()]);
+  check('overlapping cron runs send once', (await emailsTo('x@example.com')).length === 1);
+
+  // Rows that aren't done never send, even with every result filled in.
+  const notDone = [];
+  for (const st of ['queued', 'checking', 'failed']) notDone.push(await insertRow(`${st}@example.com`, st === 'queued' ? {} : { status: st, ...ALL_CLEAR }));
+  await runCron();
+  await runCron();
+  const nd = await state();
+  check('queued / checking / failed rows send nothing',
+    nd.emails.filter((e) => /^(queued|checking|failed)@/.test(e.to[0])).length === 0
+    && notDone.every((rid) => nd.rows.find((r) => r.id === rid).emailed_at === null));
+
+  // A failed Resend send releases the claim; the next run sends exactly one.
+  const flaky = await insertRow('flaky@example.com', { status: 'done', ...ALL_CLEAR });
+  failResend(1);
+  await runCron();
+  const afterFail = (await rowOf(flaky)).emailed_at;
+  await runCron();
+  await runCron();
+  check('Resend failure releases the claim, retry sends once',
+    afterFail === null && (await emailsTo('flaky@example.com')).length === 1 && Boolean((await rowOf(flaky)).emailed_at));
+
+  // Missing SITE_URL or secrets: cron skips cleanly (no send, no crash), then sends once configured.
+  const later = await insertRow('later@example.com', { status: 'done', ...ALL_CLEAR });
+  let crashed = false;
+  for (const drop of ['SITE_URL', 'RESEND_API_KEY', KEYS.service.startsWith('eyJ') ? 'SUPABASE_SERVICE_ROLE_KEY' : 'SUPABASE_SECRET_KEY']) {
+    const partial = { ...env };
+    delete partial[drop];
+    await runCron(partial).catch(() => { crashed = true; });
+  }
+  const skipped = (await emailsTo('later@example.com')).length === 0 && (await rowOf(later)).emailed_at === null;
+  await runCron();
+  check('missing SITE_URL / secrets: no send, no crash; sends once configured',
+    !crashed && skipped && (await emailsTo('later@example.com')).length === 1);
+
+  // The email reads as Real Audio: result-page colour + type in the license email's structure.
+  const flaggedMail = mail;
+  const clearMail = (await emailsTo('x@example.com'))[0];
+  const markers = [
+    ['cream ground', /background:#FFF8E0/],
+    ['brand red', /#E55A3C/],
+    ['ink', /#1A1A1A/],
+    ['Patrick Hand with mono fallback', /'Patrick Hand',Menlo,Consolas/],
+    ['boxed REAL AUDIO wordmark', /border:2px solid #1A1A1A;[^"]*">REAL&nbsp;AUDIO</],
+    ['2px ink rules', /height:2px;background:#1A1A1A;/],
+    ['red "Your result" headline', /color:#E55A3C;">Your result</],
+    ['table-wrapped red button', /bgcolor="#E55A3C" style="border:2px solid #1A1A1A;"/],
+    ['warning in a red box', /border:2px solid #E55A3C;[^"]*">This reflects right now/],
+    ['hidden preview line', /display:none;overflow:hidden/],
+  ];
+  const missingMarkers = markers.filter(([, re]) => !re.test(flaggedMail.html)).map(([n]) => n);
+  check('email markup: cream / red / ink / Patrick Hand, license-email structure', missingMarkers.length === 0, missingMarkers.join(', '));
+  check('email has no images (no logo or platform icons)', !/<img/i.test(flaggedMail.html) && !/<img/i.test(clearMail.html));
+  check('flagged verdict red, all-clear verdict ink',
+    /color:#E55A3C;">Heads up: TikTok muted it\.</.test(flaggedMail.html) && /color:#1A1A1A;">Looks clear on all three\.</.test(clearMail.html));
+  const shots = [['email-flagged-600', flaggedMail, 600], ['email-clear-600', clearMail, 600], ['email-375', flaggedMail, 375]];
+  let emailOverflow = [];
+  for (const [n, m, w] of shots) {
+    const ep = await browser.newPage({ viewport: { width: w, height: 900 } });
+    await ep.setContent(m.html, { waitUntil: 'networkidle' });
+    await ep.evaluate(() => document.fonts.ready);
+    const o = await ep.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (o > 0) emailOverflow.push(`${n}: ${o}`);
+    await ep.screenshot({ path: `${SHOTS}${n}.jpg`, fullPage: true, quality: 80 });
+    await ep.close();
+  }
+  check('email renders without sideways scroll at 600 and 375', emailOverflow.length === 0, emailOverflow.join(', '));
 
   // All-clear verdict copy.
   // Bucket that accepts large files (the limit raised on moonshots): 60 MB lands.
@@ -393,16 +498,14 @@ try {
     await p.close();
   }
 
-  // /api/config and /api/notify say which secret is missing (names only).
+  // /api/config says which secret is missing (names only).
   const saved = { ...env };
   for (const k of ['SUPABASE_ANON_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEY']) delete env[k];
   const cfg = await fetch(`${ORIGIN}/api/config`);
   const cfgBody = await cfg.json();
-  const nt = await fetch(`${ORIGIN}/api/notify`, { method: 'POST', body: JSON.stringify({ id }) });
-  const ntBody = await nt.json();
   Object.assign(env, saved);
   check('missing secrets -> 503 naming them, no key values', cfg.status === 503 && cfgBody.missing.join() === 'SUPABASE_ANON_KEY'
-    && nt.status === 503 && ntBody.missing.join() === 'SUPABASE_SERVICE_ROLE_KEY' && !JSON.stringify([cfgBody, ntBody]).includes('test'), JSON.stringify(cfgBody));
+    && !JSON.stringify(cfgBody).includes('test'), JSON.stringify(cfgBody));
   const okCfg = await fetch(`${ORIGIN}/api/config`).then((r) => r.json());
   check(`/api/config serves ${process.env.KEY_STYLE === 'new' ? 'publishable' : 'anon'} key + moonshots-style URL`, okCfg.anonKey === KEYS.anon && okCfg.supabaseUrl === env.SUPABASE_URL);
 
@@ -413,6 +516,7 @@ try {
   const fontsOk = loaded.includes('Patrick Hand');
   check('Patrick Hand loaded (drawn UI font)', fontsOk, [...new Set(loaded)].join(', '));
   check('browser requests only app/Supabase(+Google Fonts)', external.length === 0, [...hosts].join(', '));
+  check('result page never called /api/notify', notifyCalls.length === 0, notifyCalls.join(', '));
 } finally {
   await browser.close();
   server.close();

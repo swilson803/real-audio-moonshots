@@ -6,7 +6,8 @@
 //   SUPABASE_SERVICE_ROLE_KEY  moonshots service role key (server only)
 //                              or SUPABASE_SECRET_KEY (sb_secret_...)
 //   RESEND_API_KEY             Resend key
-// Optional vars: SITE_URL (needed for the cron sweep's result links), EMAIL_FROM.
+// Vars set on the Worker: SITE_URL (the site's public origin; the results
+// email cron skips without it), optional EMAIL_FROM.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "clearance-check",

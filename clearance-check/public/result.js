@@ -42,8 +42,6 @@ for (const p of PLATFORMS) {
   rows[p.key] = li;
 }
 
-let notified = false;
-
 function render(row) {
   platformsBox.hidden = false;
   for (const p of PLATFORMS) {
@@ -80,17 +78,6 @@ function render(row) {
     summary.textContent = base + ' We’ll email you when all three are in.';
     footnote.textContent = '';
   }
-
-  // The Worker sends the email once (status done + emailed_at null, then sets
-  // emailed_at). Asking again on reload is harmless: it no-ops.
-  if (row.status === 'done' && !row.emailed_at && !notified) {
-    notified = true;
-    fetch('/api/notify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    }).catch(() => { notified = false; });
-  }
 }
 
 async function poll() {
@@ -99,7 +86,7 @@ async function poll() {
     const { supabaseUrl, anonKey } = await getConfig();
     const res = await fetch(
       `${supabaseUrl}/rest/v1/submissions?id=eq.${encodeURIComponent(id)}` +
-        '&select=status,original_filename,emailed_at,youtube_result,youtube_note,tiktok_result,tiktok_note,instagram_result,instagram_note',
+        '&select=status,original_filename,youtube_result,youtube_note,tiktok_result,tiktok_note,instagram_result,instagram_note',
       { headers: { ...supabaseHeaders(anonKey), 'x-submission-id': id }, cache: 'no-store' },
     );
     if (!res.ok) throw new Error(`select ${res.status}`);
