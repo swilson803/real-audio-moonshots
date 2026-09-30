@@ -233,6 +233,16 @@ class Claim(unittest.TestCase):
         self.assertEqual(row["id"], "b")
 
 
+class ObjectKey(unittest.TestCase):
+    def test_strips_one_leading_bucket(self):
+        b = lib.BUCKET
+        self.assertEqual(pull_next.object_key(f"{b}/abc/song.mp3"), "abc/song.mp3")
+        self.assertEqual(pull_next.object_key("abc/song.mp3"), "abc/song.mp3")
+        self.assertEqual(pull_next.object_key(f"abc/{b}/song.mp3"), f"abc/{b}/song.mp3")
+        self.assertEqual(pull_next.object_key(f"{b}/{b}/song.mp3"), f"{b}/song.mp3")
+        self.assertEqual(pull_next.object_key(f"{b}-old/song.mp3"), f"{b}-old/song.mp3")
+
+
 def ffprobe(path):
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries",
@@ -277,6 +287,21 @@ class PullEndToEnd(unittest.TestCase):
         self.assertEqual((streams["video"]["width"], streams["video"]["height"]), (1280, 720))
         self.assertEqual(streams["video"]["pix_fmt"], "yuv420p")
         self.assertEqual(streams["audio"]["codec_name"], "aac")
+
+    def test_storage_path_with_bucket_prefix(self):
+        # the landing page writes "clearance-uploads/{id}/{file}"; the object key has no bucket
+        sid = "66666666-7777-8888-9999-000000000000"
+        row = new_row(sid, "1", storage_path=f"{lib.BUCKET}/{sid}/song.mp3")
+        fake = FakeSupabase([row], {f"{sid}/song.mp3": self.audio})
+        clip_dir = os.path.join(self.tmp, "c4")
+        db = lib.Supabase(config(clip_dir), session=fake)
+
+        clip = pull_next.process(db, pull_next.claim_next(db), clip_dir)
+
+        self.assertTrue(os.path.getsize(clip) > 0)
+        self.assertEqual(fake.row(sid)["status"], "checking")
+        downloads = [c[1] for c in fake.calls if "/storage/" in c[1]]
+        self.assertEqual(downloads, [f"{MOONSHOTS_URL}/storage/v1/object/{lib.BUCKET}/{sid}/song.mp3"])
 
     def test_missing_object_marks_failed(self):
         fake = FakeSupabase([new_row("gone", "1")])

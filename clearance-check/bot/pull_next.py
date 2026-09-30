@@ -15,7 +15,7 @@ import os
 import subprocess
 import tempfile
 
-from lib import BotError, Supabase, load_config, run
+from lib import BUCKET, BotError, Supabase, load_config, run
 
 CLAIM_ATTEMPTS = 5
 
@@ -65,13 +65,24 @@ def build_clip(audio_path, out_path):
         raise BotError(f"ffmpeg exited {proc.returncode}: {lines[-1] if lines else 'no output'}")
 
 
+def object_key(storage_path):
+    """Object key inside the bucket.
+
+    The landing page writes storage_path as "clearance-uploads/{id}/{file}",
+    and download() adds the bucket itself, so drop one leading bucket name.
+    Paths without it are used as they are.
+    """
+    prefix = f"{BUCKET}/"
+    return storage_path[len(prefix):] if storage_path.startswith(prefix) else storage_path
+
+
 def process(db: Supabase, row, clip_dir):
     sid = row["id"]
     out_path = os.path.abspath(os.path.join(clip_dir, f"{sid}_test.mp4"))
     ext = os.path.splitext(row["storage_path"])[1] or ".audio"
     try:
         os.makedirs(clip_dir, exist_ok=True)
-        audio = db.download(row["storage_path"])
+        audio = db.download(object_key(row["storage_path"]))
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = os.path.join(tmp, f"source{ext}")
             with open(audio_path, "wb") as f:
