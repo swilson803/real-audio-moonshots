@@ -49,12 +49,13 @@ export function getConfig() {
 // Verdict copy, shared with the Worker's results email (src/email.js).
 export function verdictFor(row) {
   const flagged = PLATFORMS.filter((p) => row[`${p.key}_result`] !== 'clear');
-  if (flagged.length === 0) return { flagged: false, text: 'Looks clear on all three.' };
+  // headline: the red half of "Your result:" on the page and email (Reject2).
+  if (flagged.length === 0) return { flagged: false, headline: 'PASSED', text: 'Looks clear on all three.' };
   const parts = flagged.map((p) => {
     const r = row[`${p.key}_result`];
     return r === 'error' ? `${p.name} couldn’t be checked` : `${p.name} ${r} it`;
   });
-  return { flagged: true, text: `Heads up: ${joinList(parts)}.` };
+  return { flagged: true, headline: 'FAILED', text: `Heads up: ${joinList(parts)}.` };
 }
 
 function joinList(a) {

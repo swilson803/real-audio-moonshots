@@ -56,7 +56,7 @@ function render(row) {
   const allIn = PLATFORMS.every((p) => row[`${p.key}_result`] !== 'pending');
   if (allIn) {
     const v = verdictFor(row);
-    verdict.textContent = v.text;
+    verdict.textContent = v.headline;
     verdict.dataset.flagged = String(v.flagged);
   } else {
     // Until all three are in, the red half of the headline is the progress.

@@ -333,7 +333,7 @@ try {
   const done = await page.$$eval('.platform-status', (els) => els.map((e) => e.textContent));
   const verdict = await page.textContent('#verdict');
   check('done row shows per-platform results', done.join('/') === 'Clear/Muted/Clear', done.join(' / '));
-  check('verdict names flagged platform', verdict === 'Heads up: TikTok muted it.', verdict);
+  check('flagged result reads FAILED', verdict === 'FAILED', verdict);
   // MS-004 Reject1 (Spencer): headline, track name, no verdict box, red italic email note, bigger CTA.
   const r1 = await page.evaluate(() => {
     const cs = (el) => getComputedStyle(el);
@@ -352,8 +352,9 @@ try {
       againSize: cs(again).fontSize,
     };
   });
-  check('headline: black "Your result:" then verdict in red, same size, drawn font',
-    r1.h1 === 'Your result: Heads up: TikTok muted it.' && r1.labelColor === 'rgb(26, 26, 26)' && r1.verdictColor === 'rgb(229, 90, 60)'
+  const h1Lines = await page.$eval('h1.headline', (el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
+  check('headline on one line: black "Your result:" then red FAILED, same size, drawn font',
+    h1Lines === 1 && r1.h1 === 'Your result: FAILED' && r1.labelColor === 'rgb(26, 26, 26)' && r1.verdictColor === 'rgb(229, 90, 60)'
     && r1.labelSize === r1.verdictSize && /Patrick Hand/.test(r1.labelFont), JSON.stringify(r1));
   check('track name in brand red', r1.track === 'my song.mp3' && r1.trackColor === 'rgb(229, 90, 60)', JSON.stringify(r1));
   check('button-looking verdict box removed', !r1.box);
@@ -376,7 +377,7 @@ try {
     && mail.text.includes('YouTube: Clear (no match)') && mail.text.includes('TikTok: Muted (muted at 0:12)') && mail.text.includes('Instagram: Clear')
     && mail.html.includes('Muted') && mail.html.includes('muted at 0:12'), mail.text);
   check('email has verdict + result link from SITE_URL',
-    mail.html.includes('Heads up: TikTok muted it.') && mail.html.includes(`href="${SITE}/r/${id}"`) && mail.text.includes(`${SITE}/r/${id}`));
+    mail.html.includes('Your result: <span style="color:#E55A3C;">FAILED</span>') && mail.text.includes('Your result: FAILED') && mail.html.includes(`href="${SITE}/r/${id}"`) && mail.text.includes(`${SITE}/r/${id}`));
   check('email sends with Idempotency-Key', mail.idempotencyKey === `clearance-result:${id}`, mail.idempotencyKey);
   check('emailed_at set', Boolean((await rowOf(id)).emailed_at));
   const stamp = (await rowOf(id)).emailed_at;
@@ -471,8 +472,8 @@ try {
   const missingMarkers = markers.filter(([, re]) => !re.test(flaggedMail.html)).map(([n]) => n);
   check('email markup: cream / red / ink / Patrick Hand, license-email structure', missingMarkers.length === 0, missingMarkers.join(', '));
   check('email has no images (no logo or platform icons)', !/<img/i.test(flaggedMail.html) && !/<img/i.test(clearMail.html));
-  check('verdict red when flagged and when clear',
-    /color:#E55A3C;">Heads up: TikTok muted it\.</.test(flaggedMail.html) && /color:#E55A3C;">Looks clear on all three\.</.test(clearMail.html));
+  check('email headline: red FAILED when flagged, red PASSED when clear',
+    /color:#E55A3C;">FAILED</.test(flaggedMail.html) && /color:#E55A3C;">PASSED</.test(clearMail.html));
   check('email: every "Clear" red, no verdict box',
     [...clearMail.html.matchAll(/color:([^;"]+);?">Clear</g)].every((m) => m[1] === '#E55A3C')
     && [...clearMail.html.matchAll(/>Clear</g)].length === 3 && !/border:3px/.test(clearMail.html));
@@ -509,7 +510,7 @@ try {
   p2.on('request', (r) => hosts.add(new URL(r.url()).host));
   await p2.goto(`${ORIGIN}/r/${fresh}`);
   await p2.waitForSelector('#verdict[data-flagged]');
-  check('all-clear verdict', (await p2.textContent('#verdict')) === 'Looks clear on all three.');
+  check('all-clear result reads PASSED', (await p2.textContent('#verdict')) === 'PASSED');
   await p2.screenshot({ path: `${SHOTS}result-done-clear-1280.jpg`, fullPage: true, quality: 70 });
 
   // Breakpoints: no sideways scroll, warning + CTA visible.

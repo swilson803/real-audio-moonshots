@@ -67,7 +67,7 @@ export function buildEmail(row, link) {
             <tr><td style="height:2px;background:${INK};"></td></tr>
             <tr>
               <td align="center" style="padding:36px 16px 8px 16px;font-family:${DRAWN};">
-                <div style="font-size:40px;line-height:1.15;color:${INK};">Your result: <span style="color:${RED};">${esc(v.text)}</span></div>
+                <div style="font-size:40px;line-height:1.15;color:${INK};">Your result: <span style="color:${RED};">${esc(v.headline)}</span></div>
                 <div style="font-size:20px;line-height:1.4;margin-top:12px;color:${INK};">Results for <span style="color:${RED};">${esc(name)}</span></div>
               </td>
             </tr>
@@ -112,7 +112,7 @@ export function buildEmail(row, link) {
 </html>`;
 
   const text = [
-    `Your result: ${v.text}`,
+    `Your result: ${v.headline}`,
     '',
     `Results for ${name}`,
     '',
