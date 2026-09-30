@@ -21,9 +21,13 @@ Env vars:
 
 | Var | Required | Value |
 |-----|----------|-------|
-| `SUPABASE_URL` | yes | `https://kucwpmtkctafzkivuqtu.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | yes | moonshots service role / secret key (`SUPABASE_SECRET_KEY` or `SUPABASE_KEY` also accepted) |
+| `MOONSHOTS_SUPABASE_URL` | yes | `https://kucwpmtkctafzkivuqtu.supabase.co` |
+| `MOONSHOTS_SERVICE_ROLE_KEY` | yes | moonshots service role / secret key |
 | `CLEARANCE_CLIP_DIR` | no | where clips are written; default `./clips` |
+
+The `MOONSHOTS_` prefix lets these sit alongside the production `SUPABASE_URL` /
+`SUPABASE_SERVICE_ROLE_KEY` on the same machine. The bot never reads the
+production names, so there is nothing to swap between runs.
 
 If a required var is missing, or the URL/key is for production or another
 project, the script prints `error: ...` to stderr and exits 1 without touching

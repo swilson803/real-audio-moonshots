@@ -124,7 +124,7 @@ def config(clip_dir="./clips"):
 
 class ConfigGuard(unittest.TestCase):
     def ok_env(self, **over):
-        env = {"SUPABASE_URL": MOONSHOTS_URL, "SUPABASE_SERVICE_ROLE_KEY": jwt(lib.MOONSHOTS_REF)}
+        env = {"MOONSHOTS_SUPABASE_URL": MOONSHOTS_URL, "MOONSHOTS_SERVICE_ROLE_KEY": jwt(lib.MOONSHOTS_REF)}
         env.update(over)
         return env
 
@@ -139,28 +139,33 @@ class ConfigGuard(unittest.TestCase):
         self.assertEqual(c.url, MOONSHOTS_URL)
         self.assertEqual(c.clip_dir, "./clips")
 
-    def test_opaque_key_and_aliases_ok(self):
-        env = {"SUPABASE_URL": MOONSHOTS_URL + "/", "SUPABASE_SECRET_KEY": "sb_secret_abc"}
+    def test_opaque_key_and_clip_dir_ok(self):
+        env = {"MOONSHOTS_SUPABASE_URL": MOONSHOTS_URL + "/", "MOONSHOTS_SERVICE_ROLE_KEY": "sb_secret_abc"}
         self.assertEqual(lib.load_config(env).key, "sb_secret_abc")
         self.assertEqual(lib.load_config({**env, "CLEARANCE_CLIP_DIR": "/tmp/x"}).clip_dir, "/tmp/x")
 
+    def test_ignores_production_style_vars(self):
+        prod = {"SUPABASE_URL": PROD_URL, "SUPABASE_SERVICE_ROLE_KEY": jwt(lib.PRODUCTION_REF)}
+        self.assertEqual(lib.load_config({**prod, **self.ok_env()}).url, MOONSHOTS_URL)
+        self.assertRefuses(prod, "Missing env var(s): MOONSHOTS_SUPABASE_URL, MOONSHOTS_SERVICE_ROLE_KEY")
+
     def test_missing_all(self):
-        self.assertRefuses({}, "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")
+        self.assertRefuses({}, "MOONSHOTS_SUPABASE_URL", "MOONSHOTS_SERVICE_ROLE_KEY")
 
     def test_missing_key(self):
-        self.assertRefuses({"SUPABASE_URL": MOONSHOTS_URL}, "SUPABASE_SERVICE_ROLE_KEY")
+        self.assertRefuses({"MOONSHOTS_SUPABASE_URL": MOONSHOTS_URL}, "MOONSHOTS_SERVICE_ROLE_KEY")
 
     def test_production_url(self):
-        self.assertRefuses(self.ok_env(SUPABASE_URL=PROD_URL), "production", lib.PRODUCTION_REF)
+        self.assertRefuses(self.ok_env(MOONSHOTS_SUPABASE_URL=PROD_URL), "production", lib.PRODUCTION_REF)
 
     def test_production_key(self):
-        self.assertRefuses(self.ok_env(SUPABASE_SERVICE_ROLE_KEY=jwt(lib.PRODUCTION_REF)), "production")
+        self.assertRefuses(self.ok_env(MOONSHOTS_SERVICE_ROLE_KEY=jwt(lib.PRODUCTION_REF)), "production")
 
     def test_other_project(self):
-        self.assertRefuses(self.ok_env(SUPABASE_URL="https://abcdefghij.supabase.co"), "moonshots")
-        self.assertRefuses(self.ok_env(SUPABASE_URL=f"https://{lib.MOONSHOTS_REF}.supabase.co.evil.com"), "moonshots")
-        self.assertRefuses(self.ok_env(SUPABASE_URL=f"http://{lib.MOONSHOTS_REF}.supabase.co"), "moonshots")
-        self.assertRefuses(self.ok_env(SUPABASE_SERVICE_ROLE_KEY=jwt("abcdefghij")), "abcdefghij")
+        self.assertRefuses(self.ok_env(MOONSHOTS_SUPABASE_URL="https://abcdefghij.supabase.co"), "moonshots")
+        self.assertRefuses(self.ok_env(MOONSHOTS_SUPABASE_URL=f"https://{lib.MOONSHOTS_REF}.supabase.co.evil.com"), "moonshots")
+        self.assertRefuses(self.ok_env(MOONSHOTS_SUPABASE_URL=f"http://{lib.MOONSHOTS_REF}.supabase.co"), "moonshots")
+        self.assertRefuses(self.ok_env(MOONSHOTS_SERVICE_ROLE_KEY=jwt("abcdefghij")), "abcdefghij")
 
 
 class CliGuard(unittest.TestCase):
@@ -168,19 +173,21 @@ class CliGuard(unittest.TestCase):
 
     def run_script(self, args, env):
         base = {k: v for k, v in os.environ.items()
-                if k not in lib.URL_VARS + lib.KEY_VARS + ("CLEARANCE_CLIP_DIR",)}
+                if k not in (lib.URL_VAR, lib.KEY_VAR, "CLEARANCE_CLIP_DIR")}
         return subprocess.run([sys.executable, *args], cwd=HERE, env={**base, **env},
                               capture_output=True, text=True, timeout=30)
 
     def test_missing_env(self):
+        # production vars on the same machine must not satisfy the bot
+        prod = {"SUPABASE_URL": PROD_URL, "SUPABASE_SERVICE_ROLE_KEY": "k"}
         for args in (["pull_next.py"],
                      ["record_result.py", "--id", "x", "--platform", "youtube", "--result", "clear"]):
-            p = self.run_script(args, {})
+            p = self.run_script(args, prod)
             self.assertEqual(p.returncode, 1)
-            self.assertIn("Missing env var(s): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY", p.stderr)
+            self.assertIn("Missing env var(s): MOONSHOTS_SUPABASE_URL, MOONSHOTS_SERVICE_ROLE_KEY", p.stderr)
 
     def test_production_url(self):
-        p = self.run_script(["pull_next.py"], {"SUPABASE_URL": PROD_URL, "SUPABASE_SERVICE_ROLE_KEY": "k"})
+        p = self.run_script(["pull_next.py"], {"MOONSHOTS_SUPABASE_URL": PROD_URL, "MOONSHOTS_SERVICE_ROLE_KEY": "k"})
         self.assertEqual(p.returncode, 1)
         self.assertIn("Refusing to run", p.stderr)
         self.assertIn(lib.PRODUCTION_REF, p.stderr)

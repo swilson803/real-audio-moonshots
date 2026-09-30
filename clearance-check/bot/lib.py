@@ -22,8 +22,9 @@ TABLE = "submissions"
 PLATFORMS = ("youtube", "tiktok", "instagram")
 RESULTS = ("clear", "claimed", "muted", "error")
 
-URL_VARS = ("SUPABASE_URL",)
-KEY_VARS = ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", "SUPABASE_KEY")
+# Prefixed so they can sit next to production SUPABASE_* vars on the same machine.
+URL_VAR = "MOONSHOTS_SUPABASE_URL"
+KEY_VAR = "MOONSHOTS_SERVICE_ROLE_KEY"
 DEFAULT_CLIP_DIR = "./clips"
 
 
@@ -36,14 +37,6 @@ class Config:
     url: str
     key: str
     clip_dir: str
-
-
-def _first_env(environ, names):
-    for name in names:
-        value = (environ.get(name) or "").strip()
-        if value:
-            return value
-    return ""
 
 
 def _key_ref(key):
@@ -60,14 +53,14 @@ def _key_ref(key):
 
 def load_config(environ=None) -> Config:
     environ = os.environ if environ is None else environ
-    url = _first_env(environ, URL_VARS).rstrip("/")
-    key = _first_env(environ, KEY_VARS)
+    url = (environ.get(URL_VAR) or "").strip().rstrip("/")
+    key = (environ.get(KEY_VAR) or "").strip()
 
     missing = []
     if not url:
-        missing.append("SUPABASE_URL")
+        missing.append(URL_VAR)
     if not key:
-        missing.append("SUPABASE_SERVICE_ROLE_KEY")
+        missing.append(KEY_VAR)
     if missing:
         raise BotError(
             f"Missing env var(s): {', '.join(missing)}. Set them to the moonshots "
@@ -83,14 +76,14 @@ def load_config(environ=None) -> Config:
     parsed = urlparse(url)
     if parsed.scheme != "https" or (parsed.hostname or "").lower() != f"{MOONSHOTS_REF}.supabase.co":
         raise BotError(
-            f"Refusing to run: SUPABASE_URL must be https://{MOONSHOTS_REF}.supabase.co "
+            f"Refusing to run: {URL_VAR} must be https://{MOONSHOTS_REF}.supabase.co "
             f"(moonshots), got {url!r}."
         )
 
     ref = _key_ref(key)
     if ref is not None and ref != MOONSHOTS_REF:
         raise BotError(
-            f"Refusing to run: SUPABASE_SERVICE_ROLE_KEY belongs to project {ref!r}, "
+            f"Refusing to run: {KEY_VAR} belongs to project {ref!r}, "
             f"not moonshots ({MOONSHOTS_REF})."
         )
 
