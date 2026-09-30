@@ -313,11 +313,12 @@ try {
     pendingStyle.name === 'rgb(26, 26, 26)'
     && /brightness\(0\)/.test(pendingStyle.filter) && !/invert\(52%\)/.test(pendingStyle.filter),
     JSON.stringify(pendingStyle));
-  const resultFonts = await page.$$eval('.lead, .platform-name, .platform-status, .warning, .verdict, a#again', (els) =>
+  const resultFonts = await page.$$eval('.lead, .platform-name, .platform-status, .warning, h1.headline, a#again', (els) =>
     els.filter(Boolean).map((e) => getComputedStyle(e).fontFamily));
   check('result UI copy uses drawn display font',
     resultFonts.length > 0 && resultFonts.every((f) => /Patrick Hand/i.test(f)), resultFonts.join(' || '));
-  check('no verdict before all three', !(await page.isVisible('#verdict')));
+  check('no verdict before all three', !(await page.$eval('#verdict', (el) => 'flagged' in el.dataset))
+    && (await page.textContent('#verdict')) === 'Checking…', await page.textContent('#verdict'));
   check('warning visible while checking', await warning());
   check('no email before done', (await state()).emails.length === 0);
   // MS-004: a row that isn't done sends nothing, however often the cron runs.
@@ -328,11 +329,37 @@ try {
   // Done row: per-platform results + verdict on the page. The page itself
   // never sends; only the cron does.
   await update({ id, status: 'done', tiktok_result: 'muted', tiktok_note: 'muted at 0:12', instagram_result: 'clear' });
-  await page.waitForSelector('#verdict-box:not([hidden])', { timeout: 10000 });
+  await page.waitForSelector('#verdict[data-flagged]', { timeout: 10000 });
   const done = await page.$$eval('.platform-status', (els) => els.map((e) => e.textContent));
   const verdict = await page.textContent('#verdict');
   check('done row shows per-platform results', done.join('/') === 'Clear/Muted/Clear', done.join(' / '));
   check('verdict names flagged platform', verdict === 'Heads up: TikTok muted it.', verdict);
+  // MS-004 Reject1 (Spencer): headline, track name, no verdict box, red italic email note, bigger CTA.
+  const r1 = await page.evaluate(() => {
+    const cs = (el) => getComputedStyle(el);
+    const label = document.querySelector('h1.headline .headline-label');
+    const v = document.getElementById('verdict');
+    const track = document.querySelector('#summary .track-name');
+    const foot = document.getElementById('footnote');
+    const again = document.getElementById('again');
+    return {
+      h1: document.querySelector('h1.headline').textContent,
+      labelColor: cs(label).color, labelSize: cs(label).fontSize, labelFont: cs(label).fontFamily,
+      verdictColor: cs(v).color, verdictSize: cs(v).fontSize,
+      track: track?.textContent, trackColor: track && cs(track).color,
+      box: Boolean(document.getElementById('verdict-box') || document.querySelector('.box-sketched-heavy')),
+      foot: foot.textContent, footColor: cs(foot).color, footStyle: cs(foot).fontStyle,
+      againSize: cs(again).fontSize,
+    };
+  });
+  check('headline: black "Your result:" then verdict in red, same size, drawn font',
+    r1.h1 === 'Your result: Heads up: TikTok muted it.' && r1.labelColor === 'rgb(26, 26, 26)' && r1.verdictColor === 'rgb(229, 90, 60)'
+    && r1.labelSize === r1.verdictSize && /Patrick Hand/.test(r1.labelFont), JSON.stringify(r1));
+  check('track name in brand red', r1.track === 'my song.mp3' && r1.trackColor === 'rgb(229, 90, 60)', JSON.stringify(r1));
+  check('button-looking verdict box removed', !r1.box);
+  check('"A copy is on its way to your email." brand red + italic',
+    r1.foot === 'A copy is on its way to your email.' && r1.footColor === 'rgb(229, 90, 60)' && r1.footStyle === 'italic', JSON.stringify(r1));
+  check('upload another track slightly bigger (20px, base CTA 16px)', r1.againSize === '20px', r1.againSize);
   check('warning visible when done', await warning());
   await page.waitForTimeout(500);
   check('open result page on a done row sends nothing by itself', (await state()).emails.length === 0 && notifyCalls.length === 0);
@@ -360,11 +387,11 @@ try {
   await runCron();
   await runCron();
   await page.goto(`${ORIGIN}/r/${id}`);
-  await page.waitForSelector('#verdict-box:not([hidden])');
+  await page.waitForSelector('#verdict[data-flagged]');
   await page.reload();
-  await page.waitForSelector('#verdict-box:not([hidden])');
+  await page.waitForSelector('#verdict[data-flagged]');
   await page.reload();
-  await page.waitForSelector('#verdict-box:not([hidden])');
+  await page.waitForSelector('#verdict[data-flagged]');
   await page.waitForTimeout(500);
   await runCron();
   check('done again / reloads / more cron runs send nothing more',
@@ -385,7 +412,7 @@ try {
   check('upload another track autofills prior email', autofilled === 'creator@example.com', autofilled);
   // Return to a result page for remaining checks that reuse `page` + `id`.
   await page.goto(`${ORIGIN}/r/${id}`);
-  await page.waitForSelector('#verdict-box:not([hidden])');
+  await page.waitForSelector('#verdict[data-flagged]');
 
   // Overlapping cron runs on a fresh done row send exactly one.
   const fresh = await insertRow('x@example.com', { status: 'done', ...ALL_CLEAR });
@@ -435,7 +462,8 @@ try {
     ['Patrick Hand with mono fallback', /'Patrick Hand',Menlo,Consolas/],
     ['boxed REAL AUDIO wordmark', /border:2px solid #1A1A1A;[^"]*">REAL&nbsp;AUDIO</],
     ['2px ink rules', /height:2px;background:#1A1A1A;/],
-    ['red "Your result" headline', /color:#E55A3C;">Your result</],
+    ['black "Your result:" + red verdict, same line', /color:#1A1A1A;">Your result: <span style="color:#E55A3C;">/],
+    ['track name in red', /Results for <span style="color:#E55A3C;">/],
     ['table-wrapped red button', /bgcolor="#E55A3C" style="border:2px solid #1A1A1A;"/],
     ['warning in a red box', /border:2px solid #E55A3C;[^"]*">This reflects right now/],
     ['hidden preview line', /display:none;overflow:hidden/],
@@ -443,8 +471,11 @@ try {
   const missingMarkers = markers.filter(([, re]) => !re.test(flaggedMail.html)).map(([n]) => n);
   check('email markup: cream / red / ink / Patrick Hand, license-email structure', missingMarkers.length === 0, missingMarkers.join(', '));
   check('email has no images (no logo or platform icons)', !/<img/i.test(flaggedMail.html) && !/<img/i.test(clearMail.html));
-  check('flagged verdict red, all-clear verdict ink',
-    /color:#E55A3C;">Heads up: TikTok muted it\.</.test(flaggedMail.html) && /color:#1A1A1A;">Looks clear on all three\.</.test(clearMail.html));
+  check('verdict red when flagged and when clear',
+    /color:#E55A3C;">Heads up: TikTok muted it\.</.test(flaggedMail.html) && /color:#E55A3C;">Looks clear on all three\.</.test(clearMail.html));
+  check('email: every "Clear" red, no verdict box',
+    [...clearMail.html.matchAll(/color:([^;"]+);?">Clear</g)].every((m) => m[1] === '#E55A3C')
+    && [...clearMail.html.matchAll(/>Clear</g)].length === 3 && !/border:3px/.test(clearMail.html));
   const shots = [['email-flagged-600', flaggedMail, 600], ['email-clear-600', clearMail, 600], ['email-375', flaggedMail, 375]];
   let emailOverflow = [];
   for (const [n, m, w] of shots) {
@@ -477,7 +508,7 @@ try {
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   p2.on('request', (r) => hosts.add(new URL(r.url()).host));
   await p2.goto(`${ORIGIN}/r/${fresh}`);
-  await p2.waitForSelector('#verdict-box:not([hidden])');
+  await p2.waitForSelector('#verdict[data-flagged]');
   check('all-clear verdict', (await p2.textContent('#verdict')) === 'Looks clear on all three.');
   await p2.screenshot({ path: `${SHOTS}result-done-clear-1280.jpg`, fullPage: true, quality: 70 });
 
@@ -490,7 +521,7 @@ try {
     const o1 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     await p.screenshot({ path: `${SHOTS}landing-${w}.jpg`, fullPage: true, quality: 70 });
     await p.goto(`${ORIGIN}/r/${id}`);
-    await p.waitForSelector('#verdict-box:not([hidden])');
+    await p.waitForSelector('#verdict[data-flagged]');
     await p.waitForLoadState('networkidle');
     const o2 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     await p.screenshot({ path: `${SHOTS}result-${w}.jpg`, fullPage: true, quality: 70 });

@@ -430,9 +430,11 @@ h1, h2, h3, p { margin: 0; }
 .platform-status[data-result="pending"] { color: var(--color-black); }
 .platform-note { flex-basis: 100%; font-size: 12px; color: rgba(26, 26, 26, 0.8); }
 .platform-note:empty { display: none; }
-.verdict { font-size: 28px; line-height: 1.2; text-align: center; }
-.verdict[data-flagged="true"] { color: var(--color-red); }
-@media (min-width: 768px) { .verdict { font-size: 40px; } }
+/* Reject1: headline is black "Your result:" + the verdict in brand red at the
+   same size (the verdict box is gone); track name red; email note red italic. */
+.headline-label { color: var(--color-black); }
+.track-name { color: var(--color-red); }
+#footnote { color: var(--color-red); font-style: italic; }
 .warning { font-size: 20px; line-height: 1.4; color: var(--color-red); }
 /* Landing: same warning box as the result page, form width, above the form. */
 .landing-warning { max-width: 448px; margin: 0 auto 24px; }
@@ -440,6 +442,8 @@ h1, h2, h3, p { margin: 0; }
 .center { text-align: center; }
 [hidden] { display: none !important; }
 a.btn-default, a.btn-primary-cta { text-decoration: none; }
+/* Reject1: result "upload another track" slightly bigger than the base CTA (16px). */
+.actions .btn-primary-cta { font-size: 20px; padding: var(--space-4) var(--space-8); }
 /* Reject9: result "upload another track" — red at rest + hover; only slight expand */
 .actions .btn-primary-cta:hover {
   transform: scale(1.04);

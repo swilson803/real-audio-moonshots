@@ -4,7 +4,9 @@
 // small grey footer), so it reads as the same sender. Colour and type come from
 // the result page (public/styles.css): cream ground, brand red, ink, and the
 // drawn Patrick Hand face, falling back to the license email's mono stack where
-// a client ignores web fonts (Gmail).
+// a client ignores web fonts (Gmail). Like the result page (Reject1): black
+// "Your result:" then the verdict in red at the same size, track name in red,
+// no separate verdict box; every result word is red, "clear" included.
 import { verdictFor, PLATFORMS } from '../public/lib.js';
 
 const CREAM = '#FFF8E0';
@@ -65,15 +67,8 @@ export function buildEmail(row, link) {
             <tr><td style="height:2px;background:${INK};"></td></tr>
             <tr>
               <td align="center" style="padding:36px 16px 8px 16px;font-family:${DRAWN};">
-                <div style="font-size:44px;line-height:1.1;color:${RED};">Your result</div>
-                <div style="font-size:20px;line-height:1.4;margin-top:12px;color:${INK};">Results for ${esc(name)}</div>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:24px 16px 0 16px;">
-                <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"><tr>
-                  <td align="center" style="border:3px solid ${INK};padding:20px 16px;font-family:${DRAWN};font-size:28px;line-height:1.2;color:${v.flagged ? RED : INK};">${esc(v.text)}</td>
-                </tr></table>
+                <div style="font-size:40px;line-height:1.15;color:${INK};">Your result: <span style="color:${RED};">${esc(v.text)}</span></div>
+                <div style="font-size:20px;line-height:1.4;margin-top:12px;color:${INK};">Results for <span style="color:${RED};">${esc(name)}</span></div>
               </td>
             </tr>
             <tr>
@@ -117,11 +112,9 @@ export function buildEmail(row, link) {
 </html>`;
 
   const text = [
-    'Your result',
+    `Your result: ${v.text}`,
     '',
     `Results for ${name}`,
-    '',
-    v.text,
     '',
     ...lines.map((l) => `${l.name}: ${l.label}${l.note ? ` (${l.note})` : ''}`),
     '',

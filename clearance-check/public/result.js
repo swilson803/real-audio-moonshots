@@ -4,7 +4,6 @@ const POLL_MS = 4000;
 const id = decodeURIComponent(location.pathname.split('/')[2] || '');
 const $ = (x) => document.getElementById(x);
 const summary = $('summary');
-const verdictBox = $('verdict-box');
 const verdict = $('verdict');
 const platformsBox = $('platforms-box');
 const list = $('platforms');
@@ -59,16 +58,25 @@ function render(row) {
     const v = verdictFor(row);
     verdict.textContent = v.text;
     verdict.dataset.flagged = String(v.flagged);
-    verdictBox.hidden = false;
   } else {
-    verdictBox.hidden = true;
+    // Until all three are in, the red half of the headline is the progress.
+    verdict.textContent = row.status === 'failed' ? LABEL.error : row.status === 'queued' ? 'Queued' : LABEL.pending;
+    delete verdict.dataset.flagged;
   }
 
   if (row.status === 'failed') {
     summary.textContent = 'The check didn’t finish. Try uploading again.';
     footnote.textContent = '';
   } else if (row.status === 'done') {
-    summary.textContent = row.original_filename ? `Results for ${row.original_filename}` : 'Results are in.';
+    if (row.original_filename) {
+      // Reject1: track name in brand red.
+      const track = document.createElement('span');
+      track.className = 'track-name';
+      track.textContent = row.original_filename;
+      summary.replaceChildren('Results for ', track);
+    } else {
+      summary.textContent = 'Results are in.';
+    }
     footnote.textContent = 'A copy is on its way to your email.';
   } else {
     // Reject9: fold email note into the status line (no separate footnote).
