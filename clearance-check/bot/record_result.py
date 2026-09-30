@@ -1,88 +1,58 @@
 #!/usr/bin/env python3
-"""Record a platform clearance result against a submission (MS-003).
+"""Record one platform's clearance result against a submission.
 
-HOW TO RUN:
-  export SUPABASE_URL=https://kucwpmtkctafzkivuqtu.supabase.co
-  export SUPABASE_SERVICE_ROLE_KEY=...
-  python3 record_result.py --id <uuid> --platform youtube --result clear
-  python3 record_result.py --id <uuid> --platform tiktok --result claimed --note "match: Artist - Song"
-  # Re-record overwrites. Row becomes status=done only after all three platforms
-  # are non-pending. Does not send email. Does not post.
+    python3 record_result.py --id UUID --platform youtube|tiktok|instagram \
+        --result clear|claimed|muted|error [--note TEXT]
 
-Moonshots Supabase only.
+Re-recording a platform overwrites it. Omitting --note leaves any existing note
+alone; --note "" clears it. Once all three platforms are non-pending the row
+becomes done. Prints key=value lines with the row's status and all results.
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 
-from lib import PLATFORMS, RESULTS, BotError, die, load_env, rest_get, rest_patch
+from lib import PLATFORMS, RESULTS, BotError, Supabase, load_config, run
 
 
 def parse_args(argv=None):
-    p = argparse.ArgumentParser(description="Record a clearance platform result (moonshots only).")
-    p.add_argument("--id", required=True, help="Submission UUID")
+    p = argparse.ArgumentParser(description="Record one platform's clearance result.")
+    p.add_argument("--id", required=True, help="submission id (uuid)")
     p.add_argument("--platform", required=True, choices=PLATFORMS)
     p.add_argument("--result", required=True, choices=RESULTS)
-    p.add_argument(
-        "--note",
-        default=None,
-        help="Optional note. Omit to leave existing note unchanged; pass empty string to clear.",
-    )
+    p.add_argument("--note", help='free-text note; omit to keep, "" to clear')
     return p.parse_args(argv)
 
 
-def all_platforms_in(row: dict) -> bool:
-    return all(row.get(f"{p}_result") not in (None, "pending") for p in PLATFORMS)
+def is_complete(row):
+    return all(row[f"{p}_result"] != "pending" for p in PLATFORMS)
 
 
-def main(argv=None) -> int:
+def record(db: Supabase, sid, platform, result, note=None):
+    values = {f"{platform}_result": result}
+    if note is not None:
+        values[f"{platform}_note"] = note or None
+    rows = db.update({"id": f"eq.{sid}"}, values)
+    if not rows:
+        raise BotError(f"No submission with id {sid}.")
+    row = rows[0]
+    if is_complete(row) and row["status"] != "done":
+        row = db.update({"id": f"eq.{sid}"}, {"status": "done"})[0]
+    return row
+
+
+def main(argv=None):
     args = parse_args(argv)
-    try:
-        env = load_env()
-    except BotError as e:
-        die(str(e))
-
-    payload = {f"{args.platform}_result": args.result}
-    if args.note is not None:
-        payload[f"{args.platform}_note"] = args.note if args.note != "" else None
-
-    try:
-        updated = rest_patch(env, f"submissions?id=eq.{args.id}", payload)
-    except BotError as e:
-        die(str(e))
-
-    if not updated:
-        die(f"No submission found for id={args.id}")
-
-    row = updated[0]
-
-    # Re-fetch in case another field raced (representation is enough usually)
-    if not all_platforms_in(row):
-        fresh = rest_get(env, f"submissions?id=eq.{args.id}&select=*")
-        row = fresh[0] if fresh else row
-
-    new_status = row.get("status")
-    if all_platforms_in(row) and row.get("status") != "done":
-        done_rows = rest_patch(env, f"submissions?id=eq.{args.id}", {"status": "done"})
-        if done_rows:
-            row = done_rows[0]
-            new_status = "done"
-
+    db = Supabase(load_config())
+    row = record(db, args.id, args.platform, args.result, args.note)
     print(f"id={row['id']}")
-    print(f"platform={args.platform}")
-    print(f"result={row[f'{args.platform}_result']}")
-    note = row.get(f"{args.platform}_note")
-    print(f"note={note if note is not None else ''}")
-    print(f"status={row.get('status') or new_status}")
+    print(f"status={row['status']}")
     for p in PLATFORMS:
-        print(f"{p}_result={row.get(f'{p}_result')}")
+        print(f"{p}_result={row[f'{p}_result']}")
+    print(f"{args.platform}_note={row.get(f'{args.platform}_note') or ''}")
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except BotError as e:
-        die(str(e))
+    run(main)

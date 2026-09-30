@@ -1,65 +1,83 @@
-# Clearance bot tooling (MS-003)
+# Catalogue Bot: clearance queue tooling (MS-003)
 
-Catalogue Bot works the moonshots `submissions` queue from its own machine —
-same idea as running `generate_test_clips.py` for the production catalog, but
-**only** against the moonshots Supabase project (`kucwpmtkctafzkivuqtu`).
+Two scripts the Catalogue Bot runs from its own machine to work the clearance
+`submissions` queue, the same way it runs `generate_test_clips.py` for the
+production catalog.
 
-Never point these scripts at production (`uprfsmwbsvzuoiyfgtgx`). They refuse.
+They talk **only** to the moonshots Supabase project (`kucwpmtkctafzkivuqtu`)
+and refuse to start if the env points at Real Audio production
+(`uprfsmwbsvzuoiyfgtgx`) or any other project. They never send email (that is
+MS-004) and never post to a platform (the bot uploads by hand).
 
-## What it does
+## Setup (once per machine)
 
-1. **`pull_next.py`** — claim the oldest `queued` row → `checking`, download its
-   audio from `clearance-uploads`, write a 61-second black-screen test clip
-   (`{id}_test.mp4`) in the same ffmpeg format as the production clearance flow.
-2. **`record_result.py`** — record one platform result (`youtube` / `tiktok` /
-   `instagram` → `clear` | `claimed` | `muted` | `error`, optional note).
-   Re-recording overwrites. The row becomes `done` only after all three
-   platforms are non-`pending`.
-
-Does **not** send email (MS-004 / Worker). Does **not** post to any platform —
-the bot uploads the clip by hand.
-
-## Env (required)
+Needs Python 3.9+, `ffmpeg` on `PATH`, and:
 
 ```bash
-export SUPABASE_URL=https://kucwpmtkctafzkivuqtu.supabase.co
-export SUPABASE_SERVICE_ROLE_KEY=...   # moonshots service role (or SUPABASE_SECRET_KEY / SUPABASE_KEY)
-# optional:
-export CLEARANCE_CLIP_DIR="$HOME/clearance-clips"   # default: ./clips
+pip install -r clearance-check/bot/requirements.txt
 ```
 
-Missing vars or a production URL/key → non-zero exit and a clear stderr message.
+Env vars:
 
-## Playbook commands
+| Var | Required | Value |
+|-----|----------|-------|
+| `SUPABASE_URL` | yes | `https://kucwpmtkctafzkivuqtu.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | moonshots service role / secret key (`SUPABASE_SECRET_KEY` or `SUPABASE_KEY` also accepted) |
+| `CLEARANCE_CLIP_DIR` | no | where clips are written; default `./clips` |
+
+If a required var is missing, or the URL/key is for production or another
+project, the script prints `error: ...` to stderr and exits 1 without touching
+the network.
+
+## Playbook
+
+Run from `clearance-check/bot/`.
+
+**1. Pull the next submission**
 
 ```bash
-cd /path/to/real-audio-moonshots/clearance-check/bot
-
-# 1. Pull oldest queued → clip + status=checking
 python3 pull_next.py
-# → prints id=… status=checking clip=/abs/path/{id}_test.mp4
-
-# 2. Hand-upload that clip to YouTube / TikTok / Instagram (copyright check only; do not post)
-
-# 3. Record each platform (order free; done flips only after the third)
-python3 record_result.py --id "$ID" --platform youtube --result clear
-python3 record_result.py --id "$ID" --platform tiktok --result claimed --note "Artist - Title"
-python3 record_result.py --id "$ID" --platform instagram --result clear
-# Re-record overwrites:
-python3 record_result.py --id "$ID" --platform tiktok --result muted --note "recheck"
 ```
+
+Claims the oldest `queued` row (status becomes `checking`), downloads its audio
+from `clearance-uploads`, and writes a 61-second black-screen clip
+(1280x720 @ 30fps, H.264 stillimage, yuv420p, AAC 192k) named `{id}_test.mp4`.
+Output:
+
+```
+id=0b6c...
+status=checking
+clip=/abs/path/clips/0b6c..._test.mp4
+original_filename=song.mp3
+```
+
+`queue empty` means nothing is queued; stop. If the download or ffmpeg fails,
+the row is set to `failed` and the script exits 1.
+
+**2. Check the clip on each platform by hand.** Upload `clip`, note the outcome,
+don't publish.
+
+**3. Record each platform result**
+
+```bash
+python3 record_result.py --id "$ID" --platform youtube   --result clear
+python3 record_result.py --id "$ID" --platform tiktok    --result claimed --note "Artist - Title"
+python3 record_result.py --id "$ID" --platform instagram --result muted
+```
+
+- `--platform`: `youtube` | `tiktok` | `instagram`
+- `--result`: `clear` | `claimed` | `muted` | `error`
+- `--note`: optional. Omit to keep the existing note; `--note ""` clears it.
+
+Any order works. The row flips to `done` after the third platform is recorded.
+Recording a platform again overwrites its result (and note, if given). Output
+lists `status` and all three results.
 
 ## Tests
 
 ```bash
-python3 test_bot.py          # mock Supabase + local ffmpeg fixture; no network to real projects
+python3 test_bot.py
 ```
 
-## Layout
-
-| File | Role |
-|------|------|
-| `lib.py` | Env guard, REST/storage helpers |
-| `pull_next.py` | Claim + clip |
-| `record_result.py` | Platform results → done |
-| `test_bot.py` | Harness |
+Uses an in-memory fake Supabase (no network) and real ffmpeg/ffprobe on a
+generated fixture to check the clip is 61s, 1280x720 H.264 + AAC.

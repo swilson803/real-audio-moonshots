@@ -1,3 +1,1 @@
-# Catalogue Bot tooling (MS-003). stdlib urllib is enough for REST/storage;
-# requests is optional if you prefer it elsewhere. System dependency: ffmpeg on PATH.
-# No pip packages required for pull_next.py / record_result.py.
+requests>=2.28

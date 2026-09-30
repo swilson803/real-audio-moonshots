@@ -1,56 +1,51 @@
 #!/usr/bin/env python3
-"""Claim the oldest queued clearance submission and build a 61s test clip.
+"""Claim the oldest queued submission and build its 61s black-screen test clip.
 
-HOW TO RUN (Catalogue Bot playbook):
-  export SUPABASE_URL=https://kucwpmtkctafzkivuqtu.supabase.co
-  export SUPABASE_SERVICE_ROLE_KEY=...   # moonshots service role only
-  # optional: export CLEARANCE_CLIP_DIR=~/clearance-clips
-  cd .../real-audio-moonshots/clearance-check/bot
-  python3 pull_next.py
+    python3 pull_next.py
 
-Prints submission id and clip path on success. Does not post anywhere.
-Does not send email. Moonshots Supabase only.
+Moves the row queued -> checking, downloads its audio from clearance-uploads,
+and writes {id}_test.mp4 into CLEARANCE_CLIP_DIR (default ./clips). If the
+download or ffmpeg fails the row is set to failed. Prints key=value lines:
+id, status, clip, original_filename. Prints "queue empty" when nothing is queued.
 """
 
 from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import tempfile
 
-from lib import (
-    BotError,
-    clip_dir,
-    die,
-    load_env,
-    rest_get,
-    rest_patch,
-    storage_download,
-)
+from lib import BotError, Supabase, load_config, run
+
+CLAIM_ATTEMPTS = 5
 
 
-def claim_oldest(env: dict) -> dict | None:
-    rows = rest_get(
-        env,
-        "submissions?status=eq.queued&order=created_at.asc&limit=1&select=*",
-    )
-    if not rows:
-        return None
-    row = rows[0]
-    claimed = rest_patch(
-        env,
-        f"submissions?id=eq.{row['id']}&status=eq.queued",
-        {"status": "checking"},
-    )
-    if not claimed:
-        # Lost race to another worker
-        return None
-    return claimed[0]
+def claim_next(db: Supabase):
+    """Flip the oldest queued row to checking. None if the queue is empty.
+
+    The PATCH filters on status=queued too, so if another worker claimed the
+    row first it matches nothing and we move on to the next oldest.
+    """
+    for _ in range(CLAIM_ATTEMPTS):
+        rows = db.select({
+            "select": "*",
+            "status": "eq.queued",
+            "order": "created_at.asc",
+            "limit": "1",
+        })
+        if not rows:
+            return None
+        claimed = db.update(
+            {"id": f"eq.{rows[0]['id']}", "status": "eq.queued"},
+            {"status": "checking"},
+        )
+        if claimed:
+            return claimed[0]
+    raise BotError(f"Could not claim a submission after {CLAIM_ATTEMPTS} attempts.")
 
 
-def make_clip(audio_path: str, output_path: str) -> None:
-    # Match production generate_test_clips.py (format reference only).
+def build_clip(audio_path, out_path):
+    """Same ffmpeg recipe as production generate_test_clips.py."""
     cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=30",
@@ -59,71 +54,52 @@ def make_clip(audio_path: str, output_path: str) -> None:
         "-c:v", "libx264", "-tune", "stillimage", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
         "-shortest",
-        output_path,
+        out_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        tail = (result.stderr or result.stdout or "unknown").strip().splitlines()
-        raise BotError(f"ffmpeg failed: {tail[-1] if tail else 'unknown'}")
-
-
-def audio_suffix(storage_path: str, original_filename: str) -> str:
-    for name in (original_filename, storage_path):
-        ext = os.path.splitext(name.split("?")[0])[1].lower()
-        if ext in (".mp3", ".wav", ".m4a", ".mpeg", ".mp4"):
-            return ext if ext != ".mpeg" else ".mp3"
-    return ".mp3"
-
-
-def main() -> int:
     try:
-        env = load_env()
-    except BotError as e:
-        die(str(e))
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise BotError("ffmpeg not found on PATH.")
+    if proc.returncode != 0:
+        lines = proc.stderr.strip().splitlines()
+        raise BotError(f"ffmpeg exited {proc.returncode}: {lines[-1] if lines else 'no output'}")
 
-    try:
-        row = claim_oldest(env)
-    except BotError as e:
-        die(str(e))
 
-    if row is None:
-        print("Queue empty (no queued submissions, or claim lost a race).")
-        return 0
-
+def process(db: Supabase, row, clip_dir):
     sid = row["id"]
-    storage_path = row["storage_path"]
-    out_dir = clip_dir()
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{sid}_test.mp4")
-
-    tmp_audio = None
+    out_path = os.path.abspath(os.path.join(clip_dir, f"{sid}_test.mp4"))
+    ext = os.path.splitext(row["storage_path"])[1] or ".audio"
     try:
-        audio_bytes = storage_download(env, storage_path)
-        suffix = audio_suffix(storage_path, row.get("original_filename") or "")
-        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-        tmp_audio = tmp.name
-        tmp.write(audio_bytes)
-        tmp.close()
-        make_clip(tmp_audio, out_path)
-    except BotError as e:
+        os.makedirs(clip_dir, exist_ok=True)
+        audio = db.download(row["storage_path"])
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = os.path.join(tmp, f"source{ext}")
+            with open(audio_path, "wb") as f:
+                f.write(audio)
+            build_clip(audio_path, out_path)
+    except (BotError, OSError) as e:
         try:
-            rest_patch(env, f"submissions?id=eq.{sid}", {"status": "failed"})
-        except BotError as e2:
-            print(f"Also failed to mark row failed: {e2}", file=sys.stderr)
-        die(f"Pull failed for {sid}: {e}")
-    finally:
-        if tmp_audio and os.path.exists(tmp_audio):
-            os.unlink(tmp_audio)
+            db.update({"id": f"eq.{sid}"}, {"status": "failed"})
+        except BotError as mark_err:
+            raise BotError(f"{sid}: {e} (and could not mark it failed: {mark_err})")
+        raise BotError(f"{sid} marked failed: {e}")
+    return out_path
 
-    print(f"id={sid}")
-    print(f"status=checking")
-    print(f"clip={os.path.abspath(out_path)}")
+
+def main():
+    config = load_config()
+    db = Supabase(config)
+    row = claim_next(db)
+    if row is None:
+        print("queue empty")
+        return 0
+    clip = process(db, row, config.clip_dir)
+    print(f"id={row['id']}")
+    print(f"status={row['status']}")
+    print(f"clip={clip}")
     print(f"original_filename={row.get('original_filename') or ''}")
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except BotError as e:
-        die(str(e))
+    run(main)

@@ -1,365 +1,350 @@
 #!/usr/bin/env python3
-"""MS-003 bot harness: mock Supabase + local ffmpeg. No real project, no email."""
+"""Tests for the Catalogue Bot scripts. No network: Supabase is an in-memory
+fake that understands the PostgREST filters the scripts use. The clip test runs
+real ffmpeg/ffprobe on a generated fixture.
+
+    python3 test_bot.py
+"""
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import unquote
 
-# Allow `python3 test_bot.py` from bot/
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 
-from lib import BotError, load_env  # noqa: E402
+import lib  # noqa: E402
 import pull_next  # noqa: E402
 import record_result  # noqa: E402
 
-MOONSHOTS = "https://kucwpmtkctafzkivuqtu.supabase.co"
-PROD = "https://uprfsmwbsvzuoiyfgtgx.supabase.co"
-# Fake moonshots-shaped JWT (ref claim only; not a real key)
-MOON_JWT = (
-    "eyJhbGciOiJub25lIn0."
-    "eyJyZWYiOiJrdWN3cG10a2N0YWZ6a2l2dXF0dSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUifQ."
-    "x"
-)
-PROD_JWT = (
-    "eyJhbGciOiJub25lIn0."
-    "eyJyZWYiOiJ1cHJmc213YnN2enVvaXlmZ3RneCIsInJvbGUiOiJzZXJ2aWNlX3JvbGUifQ."
-    "x"
-)
+MOONSHOTS_URL = f"https://{lib.MOONSHOTS_REF}.supabase.co"
+PROD_URL = f"https://{lib.PRODUCTION_REF}.supabase.co"
 
 
-class FakeSB:
-    def __init__(self):
-        self.rows = {}
-        self.objects = {}  # path -> bytes
-        self.lock = threading.Lock()
-
-    def seed_queued(self, sid, storage_path, audio: bytes, email="ra_test@example.com"):
-        with self.lock:
-            self.rows[sid] = {
-                "id": sid,
-                "created_at": "2026-09-29T00:00:00Z",
-                "email": email,
-                "original_filename": "RA_TEST_tone.wav",
-                "storage_path": storage_path,
-                "status": "queued",
-                "youtube_result": "pending",
-                "youtube_note": None,
-                "tiktok_result": "pending",
-                "tiktok_note": None,
-                "instagram_result": "pending",
-                "instagram_note": None,
-                "emailed_at": None,
-            }
-            self.objects[storage_path] = audio
+def jwt(ref):
+    body = base64.urlsafe_b64encode(json.dumps({"ref": ref, "role": "service_role"}).encode())
+    return f"eyJhbGciOiJIUzI1NiJ9.{body.decode().rstrip('=')}.sig"
 
 
-FAKE = FakeSB()
+def new_row(sid, created_at, **over):
+    row = {
+        "id": sid, "created_at": created_at, "email": "t@example.com",
+        "original_filename": "song.mp3", "storage_path": f"uploads/{sid}/song.mp3",
+        "status": "queued", "emailed_at": None,
+    }
+    for p in lib.PLATFORMS:
+        row[f"{p}_result"] = "pending"
+        row[f"{p}_note"] = None
+    row.update(over)
+    return row
 
 
-def _match(row, params):
-    for k, vals in params.items():
-        if k in ("select", "order", "limit"):
-            continue
-        for v in vals:
-            op, _, val = v.partition(".")
-            if op == "eq" and str(row.get(k)) != val:
+class Resp:
+    def __init__(self, status, body=None, content=b""):
+        self.status_code = status
+        self._body = body
+        self.content = content
+        self.text = json.dumps(body) if body is not None else content.decode("latin1")
+
+    def json(self):
+        return self._body
+
+
+class FakeSupabase:
+    """Session stand-in: in-memory submissions table + clearance-uploads bucket."""
+
+    def __init__(self, rows=(), objects=None):
+        self.rows = [dict(r) for r in rows]
+        self.objects = dict(objects or {})
+        self.calls = []
+
+    def _auth_ok(self, headers):
+        return headers.get("apikey") and headers.get("Authorization", "").startswith("Bearer ")
+
+    def _match(self, row, params):
+        for col, cond in params.items():
+            if col in ("select", "order", "limit"):
+                continue
+            op, _, val = cond.partition(".")
+            assert op == "eq", cond
+            if str(row.get(col)) != val:
                 return False
-            if op == "is" and val == "null" and row.get(k) is not None:
-                return False
-    return True
+        return True
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        self.calls.append(("GET", url, params))
+        assert self._auth_ok(headers)
+        storage = f"{MOONSHOTS_URL}/storage/v1/object/{lib.BUCKET}/"
+        if url.startswith(storage):
+            path = unquote(url[len(storage):])
+            if path not in self.objects:
+                return Resp(400, {"error": "not_found"})
+            return Resp(200, content=self.objects[path])
+        assert url == f"{MOONSHOTS_URL}/rest/v1/{lib.TABLE}", url
+        rows = [r for r in self.rows if self._match(r, params)]
+        col, _, direction = params.get("order", "created_at.asc").partition(".")
+        rows.sort(key=lambda r: r[col], reverse=direction == "desc")
+        if "limit" in params:
+            rows = rows[: int(params["limit"])]
+        return Resp(200, [dict(r) for r in rows])
+
+    def patch(self, url, params=None, json=None, headers=None, timeout=None):
+        self.calls.append(("PATCH", url, params, json))
+        assert self._auth_ok(headers)
+        assert headers.get("Prefer") == "return=representation"
+        assert url == f"{MOONSHOTS_URL}/rest/v1/{lib.TABLE}", url
+        for col, val in json.items():
+            if col == "status":
+                assert val in ("queued", "checking", "done", "failed")
+            elif col.endswith("_result"):
+                assert val in ("pending",) + lib.RESULTS
+            assert col in self.rows[0] if self.rows else True, col
+        out = []
+        for r in self.rows:
+            if self._match(r, params):
+                r.update(json)
+                out.append(dict(r))
+        return Resp(200, out)
+
+    def row(self, sid):
+        return next(r for r in self.rows if r["id"] == sid)
 
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
-    def _read(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        return self.rfile.read(n) if n else b""
-
-    def _json(self, code, obj):
-        body = json.dumps(obj).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):
-        u = urlparse(self.path)
-        if u.path.startswith("/storage/v1/object/clearance-uploads/"):
-            path = u.path.split("/storage/v1/object/clearance-uploads/", 1)[1]
-            from urllib.parse import unquote
-            path = unquote(path)
-            data = FAKE.objects.get(path)
-            if data is None:
-                self._json(404, {"error": "not found"})
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-            return
-        if u.path == "/rest/v1/submissions":
-            params = parse_qs(u.query)
-            with FAKE.lock:
-                rows = [r for r in FAKE.rows.values() if _match(r, params)]
-                if "order" in params and "created_at.asc" in params["order"]:
-                    rows.sort(key=lambda r: r["created_at"])
-                if "limit" in params:
-                    rows = rows[: int(params["limit"][0])]
-                # shallow copy
-                rows = [dict(r) for r in rows]
-            self._json(200, rows)
-            return
-        self._json(404, {"error": "nope"})
-
-    def do_PATCH(self):
-        u = urlparse(self.path)
-        if u.path != "/rest/v1/submissions":
-            self._json(404, {"error": "nope"})
-            return
-        params = parse_qs(u.query)
-        payload = json.loads(self._read().decode() or "{}")
-        with FAKE.lock:
-            out = []
-            for rid, row in list(FAKE.rows.items()):
-                if not _match(row, params):
-                    continue
-                row.update(payload)
-                out.append(dict(row))
-        self._json(200, out)
+def config(clip_dir="./clips"):
+    return lib.Config(url=MOONSHOTS_URL, key=jwt(lib.MOONSHOTS_REF), clip_dir=clip_dir)
 
 
-def start_server():
-    httpd = HTTPServer(("127.0.0.1", 0), Handler)
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
-    port = httpd.server_address[1]
-    return httpd, f"http://127.0.0.1:{port}"
+class ConfigGuard(unittest.TestCase):
+    def ok_env(self, **over):
+        env = {"SUPABASE_URL": MOONSHOTS_URL, "SUPABASE_SERVICE_ROLE_KEY": jwt(lib.MOONSHOTS_REF)}
+        env.update(over)
+        return env
+
+    def assertRefuses(self, env, *fragments):
+        with self.assertRaises(lib.BotError) as cm:
+            lib.load_config(env)
+        for frag in fragments:
+            self.assertIn(frag, str(cm.exception))
+
+    def test_moonshots_ok(self):
+        c = lib.load_config(self.ok_env())
+        self.assertEqual(c.url, MOONSHOTS_URL)
+        self.assertEqual(c.clip_dir, "./clips")
+
+    def test_opaque_key_and_aliases_ok(self):
+        env = {"SUPABASE_URL": MOONSHOTS_URL + "/", "SUPABASE_SECRET_KEY": "sb_secret_abc"}
+        self.assertEqual(lib.load_config(env).key, "sb_secret_abc")
+        self.assertEqual(lib.load_config({**env, "CLEARANCE_CLIP_DIR": "/tmp/x"}).clip_dir, "/tmp/x")
+
+    def test_missing_all(self):
+        self.assertRefuses({}, "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")
+
+    def test_missing_key(self):
+        self.assertRefuses({"SUPABASE_URL": MOONSHOTS_URL}, "SUPABASE_SERVICE_ROLE_KEY")
+
+    def test_production_url(self):
+        self.assertRefuses(self.ok_env(SUPABASE_URL=PROD_URL), "production", lib.PRODUCTION_REF)
+
+    def test_production_key(self):
+        self.assertRefuses(self.ok_env(SUPABASE_SERVICE_ROLE_KEY=jwt(lib.PRODUCTION_REF)), "production")
+
+    def test_other_project(self):
+        self.assertRefuses(self.ok_env(SUPABASE_URL="https://abcdefghij.supabase.co"), "moonshots")
+        self.assertRefuses(self.ok_env(SUPABASE_URL=f"https://{lib.MOONSHOTS_REF}.supabase.co.evil.com"), "moonshots")
+        self.assertRefuses(self.ok_env(SUPABASE_URL=f"http://{lib.MOONSHOTS_REF}.supabase.co"), "moonshots")
+        self.assertRefuses(self.ok_env(SUPABASE_SERVICE_ROLE_KEY=jwt("abcdefghij")), "abcdefghij")
 
 
-def make_wav(path: Path, seconds: float = 2.0):
-    """Tiny PCM wav via ffmpeg so pull can encode a clip."""
-    subprocess.run(
-        [
-            "ffmpeg", "-y", "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
-            "-ar", "44100", "-ac", "1", str(path),
-        ],
-        check=True, capture_output=True,
-    )
+class CliGuard(unittest.TestCase):
+    """The scripts themselves exit non-zero with a clear message, before any network."""
 
-
-class EnvTests(unittest.TestCase):
-    def tearDown(self):
-        for k in (
-            "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY",
-            "SUPABASE_KEY", "CLEARANCE_CLIP_DIR",
-        ):
-            os.environ.pop(k, None)
+    def run_script(self, args, env):
+        base = {k: v for k, v in os.environ.items()
+                if k not in lib.URL_VARS + lib.KEY_VARS + ("CLEARANCE_CLIP_DIR",)}
+        return subprocess.run([sys.executable, *args], cwd=HERE, env={**base, **env},
+                              capture_output=True, text=True, timeout=30)
 
     def test_missing_env(self):
-        with self.assertRaises(BotError) as cm:
-            load_env()
-        self.assertIn("Missing required env", str(cm.exception))
+        for args in (["pull_next.py"],
+                     ["record_result.py", "--id", "x", "--platform", "youtube", "--result", "clear"]):
+            p = self.run_script(args, {})
+            self.assertEqual(p.returncode, 1)
+            self.assertIn("Missing env var(s): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY", p.stderr)
 
-    def test_refuse_production_url(self):
-        os.environ["SUPABASE_URL"] = PROD
-        os.environ["SUPABASE_SERVICE_ROLE_KEY"] = MOON_JWT
-        with self.assertRaises(BotError) as cm:
-            load_env()
-        self.assertIn("production", str(cm.exception).lower())
+    def test_production_url(self):
+        p = self.run_script(["pull_next.py"], {"SUPABASE_URL": PROD_URL, "SUPABASE_SERVICE_ROLE_KEY": "k"})
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("Refusing to run", p.stderr)
+        self.assertIn(lib.PRODUCTION_REF, p.stderr)
 
-    def test_refuse_production_key(self):
-        os.environ["SUPABASE_URL"] = MOONSHOTS
-        os.environ["SUPABASE_SERVICE_ROLE_KEY"] = PROD_JWT
-        with self.assertRaises(BotError) as cm:
-            load_env()
-        self.assertIn("production", str(cm.exception).lower())
-
-    def test_refuse_wrong_project_url(self):
-        os.environ["SUPABASE_URL"] = "https://abcdefghijklmnop.supabase.co"
-        os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "sb_secret_test"
-        with self.assertRaises(BotError) as cm:
-            load_env()
-        self.assertIn("moonshots", str(cm.exception).lower())
+    def test_bad_args(self):
+        p = self.run_script(["record_result.py", "--id", "x", "--platform", "facebook", "--result", "clear"], {})
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("invalid choice", p.stderr)
 
 
-class FlowTests(unittest.TestCase):
+class Claim(unittest.TestCase):
+    def test_claims_oldest_queued(self):
+        fake = FakeSupabase([
+            new_row("b", "2026-09-02T00:00:00Z"),
+            new_row("a", "2026-09-01T00:00:00Z"),
+            new_row("z", "2026-08-01T00:00:00Z", status="done"),
+        ])
+        row = pull_next.claim_next(lib.Supabase(config(), session=fake))
+        self.assertEqual(row["id"], "a")
+        self.assertEqual(fake.row("a")["status"], "checking")
+        self.assertEqual(fake.row("b")["status"], "queued")
+        patch = [c for c in fake.calls if c[0] == "PATCH"][0]
+        self.assertEqual(patch[2], {"id": "eq.a", "status": "eq.queued"})
+
+    def test_empty_queue(self):
+        fake = FakeSupabase([new_row("a", "2026-09-01", status="checking")])
+        self.assertIsNone(pull_next.claim_next(lib.Supabase(config(), session=fake)))
+
+    def test_lost_race_moves_to_next(self):
+        fake = FakeSupabase([new_row("a", "1"), new_row("b", "2")])
+        real_get = fake.get
+        state = {"n": 0}
+
+        def racing_get(url, params=None, **kw):
+            resp = real_get(url, params=params, **kw)
+            if state["n"] == 0:  # another worker grabs "a" between our GET and PATCH
+                fake.row("a")["status"] = "checking"
+            state["n"] += 1
+            return resp
+
+        fake.get = racing_get
+        row = pull_next.claim_next(lib.Supabase(config(), session=fake))
+        self.assertEqual(row["id"], "b")
+
+
+def ffprobe(path):
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries",
+         "format=duration:stream=codec_type,codec_name,width,height,pix_fmt",
+         "-of", "json", path],
+        capture_output=True, text=True, check=True).stdout
+    return json.loads(out)
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg not installed")
+class PullEndToEnd(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.httpd, cls.base = start_server()
+        cls.tmp = tempfile.mkdtemp()
+        cls.fixture = os.path.join(cls.tmp, "fixture.mp3")
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=75",
+                        "-c:a", "libmp3lame", "-b:a", "128k", cls.fixture],
+                       capture_output=True, check=True)
+        with open(cls.fixture, "rb") as f:
+            cls.audio = f.read()
 
     @classmethod
     def tearDownClass(cls):
-        cls.httpd.shutdown()
+        shutil.rmtree(cls.tmp, ignore_errors=True)
 
+    def test_clip_is_61s_black_h264_aac(self):
+        sid = "11111111-2222-3333-4444-555555555555"
+        row = new_row(sid, "1", storage_path=f"{sid}/My Song.mp3")
+        fake = FakeSupabase([row], {f"{sid}/My Song.mp3": self.audio})
+        clip_dir = os.path.join(self.tmp, "clips")
+        db = lib.Supabase(config(clip_dir), session=fake)
+
+        claimed = pull_next.claim_next(db)
+        clip = pull_next.process(db, claimed, clip_dir)
+
+        self.assertEqual(clip, os.path.join(clip_dir, f"{sid}_test.mp4"))
+        self.assertEqual(fake.row(sid)["status"], "checking")
+        info = ffprobe(clip)
+        self.assertAlmostEqual(float(info["format"]["duration"]), 61.0, delta=0.3)
+        streams = {s["codec_type"]: s for s in info["streams"]}
+        self.assertEqual(streams["video"]["codec_name"], "h264")
+        self.assertEqual((streams["video"]["width"], streams["video"]["height"]), (1280, 720))
+        self.assertEqual(streams["video"]["pix_fmt"], "yuv420p")
+        self.assertEqual(streams["audio"]["codec_name"], "aac")
+
+    def test_missing_object_marks_failed(self):
+        fake = FakeSupabase([new_row("gone", "1")])
+        db = lib.Supabase(config(os.path.join(self.tmp, "c2")), session=fake)
+        row = pull_next.claim_next(db)
+        with self.assertRaises(lib.BotError) as cm:
+            pull_next.process(db, row, db.config.clip_dir)
+        self.assertIn("marked failed", str(cm.exception))
+        self.assertEqual(fake.row("gone")["status"], "failed")
+
+    def test_bad_audio_marks_failed(self):
+        fake = FakeSupabase([new_row("junk", "1")], {"uploads/junk/song.mp3": b"not audio"})
+        db = lib.Supabase(config(os.path.join(self.tmp, "c3")), session=fake)
+        row = pull_next.claim_next(db)
+        with self.assertRaises(lib.BotError) as cm:
+            pull_next.process(db, row, db.config.clip_dir)
+        self.assertIn("ffmpeg exited", str(cm.exception))
+        self.assertEqual(fake.row("junk")["status"], "failed")
+
+
+class Record(unittest.TestCase):
     def setUp(self):
-        FAKE.rows.clear()
-        FAKE.objects.clear()
-        self.tmp = tempfile.TemporaryDirectory()
-        self.clip_dir = Path(self.tmp.name) / "clips"
-        self.clip_dir.mkdir()
-        # Point moonshots URL at mock while keeping ref in the string for the guard.
-        # Guard requires MOONSHOTS_REF in URL — use query/host trick: embed ref as host alias.
-        # We override load by setting URL to real moonshots host but monkeypatch env['url']
-        # after load — easier: temporarily relax by using a URL that contains the ref
-        # as a subdomain-style path. Simplest: set SUPABASE_URL to moonshots and patch
-        # pull_next/record to use mock base after load_env.
-        os.environ["SUPABASE_URL"] = MOONSHOTS
-        os.environ["SUPABASE_SERVICE_ROLE_KEY"] = MOON_JWT
-        os.environ["CLEARANCE_CLIP_DIR"] = str(self.clip_dir)
+        self.fake = FakeSupabase([new_row("s1", "1", status="checking")])
+        self.db = lib.Supabase(config(), session=self.fake)
 
-    def tearDown(self):
-        self.tmp.cleanup()
-        for k in (
-            "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY",
-            "SUPABASE_KEY", "CLEARANCE_CLIP_DIR",
-        ):
-            os.environ.pop(k, None)
+    def test_done_only_after_third(self):
+        r = record_result.record(self.db, "s1", "youtube", "clear")
+        self.assertEqual(r["status"], "checking")
+        r = record_result.record(self.db, "s1", "tiktok", "claimed", "Artist - Title")
+        self.assertEqual(r["status"], "checking")
+        self.assertEqual(r["tiktok_note"], "Artist - Title")
+        r = record_result.record(self.db, "s1", "instagram", "muted")
+        self.assertEqual(r["status"], "done")
+        self.assertEqual(self.fake.row("s1")["status"], "done")
 
-    def _env(self):
-        env = load_env()
-        env["url"] = self.base  # talk to mock
-        return env
+    def test_rerecord_overwrites(self):
+        record_result.record(self.db, "s1", "tiktok", "claimed", "first")
+        r = record_result.record(self.db, "s1", "tiktok", "error", "second")
+        self.assertEqual((r["tiktok_result"], r["tiktok_note"]), ("error", "second"))
+        # after done, re-recording still works and the row stays done
+        record_result.record(self.db, "s1", "youtube", "clear")
+        record_result.record(self.db, "s1", "instagram", "clear")
+        r = record_result.record(self.db, "s1", "youtube", "claimed")
+        self.assertEqual((r["youtube_result"], r["status"]), ("claimed", "done"))
 
-    def test_pull_makes_clip_and_checking(self):
-        wav = Path(self.tmp.name) / "tone.wav"
-        make_wav(wav, 2.0)
-        sid = "11111111-1111-1111-1111-111111111111"
-        path = f"{sid}/RA_TEST_tone.wav"
-        FAKE.seed_queued(sid, path, wav.read_bytes())
+    def test_note_omitted_keeps_empty_clears(self):
+        record_result.record(self.db, "s1", "youtube", "claimed", "keep me")
+        r = record_result.record(self.db, "s1", "youtube", "clear")
+        self.assertEqual(r["youtube_note"], "keep me")
+        r = record_result.record(self.db, "s1", "youtube", "clear", "")
+        self.assertIsNone(r["youtube_note"])
 
-        env = self._env()
-        row = pull_next.claim_oldest(env)
-        self.assertIsNotNone(row)
-        self.assertEqual(row["status"], "checking")
-        self.assertEqual(FAKE.rows[sid]["status"], "checking")
+    def test_unknown_id(self):
+        with self.assertRaises(lib.BotError) as cm:
+            record_result.record(self.db, "nope", "youtube", "clear")
+        self.assertIn("No submission with id nope", str(cm.exception))
 
-        # full pull path:
-        # reset and run main pieces
-        FAKE.rows[sid]["status"] = "queued"
-        # claim again
-        row = pull_next.claim_oldest(env)
-        out = self.clip_dir / f"{sid}_test.mp4"
-        tmp_audio = Path(self.tmp.name) / "in.wav"
-        tmp_audio.write_bytes(wav.read_bytes())
-        pull_next.make_clip(str(tmp_audio), str(out))
-        self.assertTrue(out.is_file())
-        # ffprobe duration ~2s because -shortest with 2s audio (same as production)
-        probe = subprocess.run(
-            [
-                "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", str(out),
-            ],
-            capture_output=True, text=True, check=True,
-        )
-        dur = float(probe.stdout.strip())
-        self.assertGreater(dur, 1.5)
-        self.assertLess(dur, 3.0)
-        # has video + audio streams
-        streams = subprocess.run(
-            [
-                "ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
-                "-of", "csv=p=0", str(out),
-            ],
-            capture_output=True, text=True, check=True,
-        ).stdout
-        self.assertIn("video", streams)
-        self.assertIn("audio", streams)
-
-    def test_clip_61s_when_audio_long(self):
-        wav = Path(self.tmp.name) / "long.wav"
-        make_wav(wav, 70.0)
-        out = self.clip_dir / "long_test.mp4"
-        pull_next.make_clip(str(wav), str(out))
-        probe = subprocess.run(
-            [
-                "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", str(out),
-            ],
-            capture_output=True, text=True, check=True,
-        )
-        dur = float(probe.stdout.strip())
-        self.assertGreater(dur, 60.0)
-        self.assertLess(dur, 62.5)
-
-    def test_record_done_only_after_third_and_overwrite(self):
-        sid = "22222222-2222-2222-2222-222222222222"
-        FAKE.seed_queued(sid, f"{sid}/x.wav", b"RIFF....")
-        FAKE.rows[sid]["status"] = "checking"
-        env = self._env()
-
-        # patch record_result to use mock: call internals with env override
-        def record(platform, result, note=None):
-            payload = {f"{platform}_result": result}
-            if note is not None:
-                payload[f"{platform}_note"] = note if note != "" else None
-            updated = pull_next.rest_patch(env, f"submissions?id=eq.{sid}", payload)
-            row = updated[0]
-            if record_result.all_platforms_in(row) and row.get("status") != "done":
-                updated = pull_next.rest_patch(env, f"submissions?id=eq.{sid}", {"status": "done"})
-                row = updated[0]
-            return row
-
-        r1 = record("youtube", "clear")
-        self.assertEqual(r1["status"], "checking")
-        self.assertEqual(r1["youtube_result"], "clear")
-
-        r2 = record("tiktok", "claimed", "first")
-        self.assertEqual(r2["status"], "checking")
-        self.assertEqual(r2["tiktok_note"], "first")
-
-        # overwrite tiktok
-        r2b = record("tiktok", "muted", "recheck")
-        self.assertEqual(r2b["tiktok_result"], "muted")
-        self.assertEqual(r2b["tiktok_note"], "recheck")
-        self.assertEqual(r2b["status"], "checking")
-
-        r3 = record("instagram", "error", "timeout")
-        self.assertEqual(r3["status"], "done")
-        self.assertEqual(r3["instagram_result"], "error")
-
-        # overwrite after done still works, stays done
-        r4 = record("youtube", "claimed", "late")
-        self.assertEqual(r4["youtube_result"], "claimed")
-        self.assertEqual(r4["status"], "done")
+    def test_never_touches_email(self):
+        for p in lib.PLATFORMS:
+            record_result.record(self.db, "s1", p, "clear")
+        for call in self.fake.calls:
+            if call[0] == "PATCH":
+                self.assertNotIn("emailed_at", call[3])
+        self.assertIsNone(self.fake.row("s1")["emailed_at"])
 
 
-class CliEnvTests(unittest.TestCase):
-    """Scripts exit non-zero with clear message when env bad."""
+class HttpErrors(unittest.TestCase):
+    def test_http_error_is_bot_error(self):
+        class Broken:
+            def get(self, *a, **kw):
+                return Resp(401, {"message": "Invalid API key"})
 
-    def test_pull_missing_env_exits(self):
-        env = os.environ.copy()
-        for k in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", "SUPABASE_KEY"):
-            env.pop(k, None)
-        r = subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "pull_next.py")],
-            capture_output=True, text=True, env=env,
-        )
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("Missing required env", r.stderr)
-
-    def test_pull_prod_url_exits(self):
-        env = os.environ.copy()
-        env["SUPABASE_URL"] = PROD
-        env["SUPABASE_SERVICE_ROLE_KEY"] = MOON_JWT
-        r = subprocess.run(
-            [sys.executable, str(Path(__file__).parent / "pull_next.py")],
-            capture_output=True, text=True, env=env,
-        )
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("production", r.stderr.lower())
+        with self.assertRaises(lib.BotError) as cm:
+            lib.Supabase(config(), session=Broken()).select({})
+        self.assertIn("HTTP 401", str(cm.exception))
 
 
 if __name__ == "__main__":

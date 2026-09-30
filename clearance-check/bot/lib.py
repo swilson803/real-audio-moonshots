@@ -1,167 +1,159 @@
-#!/usr/bin/env python3
-"""Shared helpers for clearance-check Catalogue Bot tooling (MS-003).
+"""Shared plumbing for the clearance-check Catalogue Bot scripts (MS-003).
 
-Talks only to the moonshots Supabase project. Refuses production.
+Everything here talks to the moonshots Supabase project and nothing else.
+load_config() refuses to hand back a config when env vars are missing or when
+the URL or key points anywhere other than moonshots (production included).
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+from dataclasses import dataclass
+from urllib.parse import quote, urlparse
 
 MOONSHOTS_REF = "kucwpmtkctafzkivuqtu"
 PRODUCTION_REF = "uprfsmwbsvzuoiyfgtgx"
 BUCKET = "clearance-uploads"
+TABLE = "submissions"
 
 PLATFORMS = ("youtube", "tiktok", "instagram")
 RESULTS = ("clear", "claimed", "muted", "error")
 
-# Same ffmpeg shape as production generate_test_clips.py (format reference only).
-FFMPEG_CLIP_ARGS = [
-    "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=30",
-    # "-i", audio_path  inserted by caller
-    "-t", "61",
-    "-c:v", "libx264", "-tune", "stillimage", "-pix_fmt", "yuv420p",
-    "-c:a", "aac", "-b:a", "192k",
-    "-shortest",
-]
+URL_VARS = ("SUPABASE_URL",)
+KEY_VARS = ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY", "SUPABASE_KEY")
+DEFAULT_CLIP_DIR = "./clips"
 
 
 class BotError(Exception):
-    """User-facing failure; message already suitable for stderr."""
+    """A failure the bot should see as one clear line on stderr."""
 
 
-def _jwt_ref(key: str) -> str | None:
+@dataclass(frozen=True)
+class Config:
+    url: str
+    key: str
+    clip_dir: str
+
+
+def _first_env(environ, names):
+    for name in names:
+        value = (environ.get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _key_ref(key):
+    """Project ref baked into a legacy JWT key, or None for opaque keys."""
+    parts = key.split(".")
+    if len(parts) != 3:
+        return None
     try:
-        import base64
-        parts = key.split(".")
-        if len(parts) < 2:
-            return None
-        pad = "=" * ((4 - len(parts[1]) % 4) % 4)
-        payload = base64.urlsafe_b64decode(parts[1] + pad)
-        return json.loads(payload).get("ref")
-    except Exception:
+        body = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(body)).get("ref")
+    except (ValueError, UnicodeDecodeError, AttributeError):
         return None
 
 
-def load_env() -> dict:
-    """Require moonshots-only SUPABASE_URL + service role key. Clear errors."""
-    url = (os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
-    key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        or os.environ.get("SUPABASE_SECRET_KEY")
-        or os.environ.get("SUPABASE_KEY")
-        or ""
-    ).strip()
+def load_config(environ=None) -> Config:
+    environ = os.environ if environ is None else environ
+    url = _first_env(environ, URL_VARS).rstrip("/")
+    key = _first_env(environ, KEY_VARS)
 
     missing = []
     if not url:
         missing.append("SUPABASE_URL")
     if not key:
-        missing.append("SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY / SUPABASE_KEY)")
+        missing.append("SUPABASE_SERVICE_ROLE_KEY")
     if missing:
         raise BotError(
-            "Missing required env var(s): " + ", ".join(missing) + ". "
-            "Set them to the moonshots project only "
-            f"(ref {MOONSHOTS_REF})."
+            f"Missing env var(s): {', '.join(missing)}. Set them to the moonshots "
+            f"Supabase project ({MOONSHOTS_REF}) before running the bot."
         )
 
-    if PRODUCTION_REF in url:
+    if PRODUCTION_REF in url or PRODUCTION_REF in key or _key_ref(key) == PRODUCTION_REF:
         raise BotError(
-            "Refusing to talk to Real Audio production Supabase "
-            f"({PRODUCTION_REF}). Use moonshots ({MOONSHOTS_REF}) only."
+            f"Refusing to run: env points at Real Audio production ({PRODUCTION_REF}). "
+            f"The bot only works against moonshots ({MOONSHOTS_REF})."
         )
-    if MOONSHOTS_REF not in url:
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or (parsed.hostname or "").lower() != f"{MOONSHOTS_REF}.supabase.co":
         raise BotError(
-            f"SUPABASE_URL must be the moonshots project ({MOONSHOTS_REF}). "
-            f"Got: {url}"
+            f"Refusing to run: SUPABASE_URL must be https://{MOONSHOTS_REF}.supabase.co "
+            f"(moonshots), got {url!r}."
         )
 
-    ref = _jwt_ref(key)
-    if ref == PRODUCTION_REF:
+    ref = _key_ref(key)
+    if ref is not None and ref != MOONSHOTS_REF:
         raise BotError(
-            "Refusing a Supabase key for Real Audio production. "
-            f"Use a moonshots ({MOONSHOTS_REF}) service role key."
-        )
-    if ref and ref != MOONSHOTS_REF:
-        raise BotError(
-            f"Refusing a Supabase key for another project (ref={ref}). "
-            f"Moonshots only ({MOONSHOTS_REF})."
+            f"Refusing to run: SUPABASE_SERVICE_ROLE_KEY belongs to project {ref!r}, "
+            f"not moonshots ({MOONSHOTS_REF})."
         )
 
-    return {
-        "url": url,
-        "key": key,
-        "clip_dir": (os.environ.get("CLEARANCE_CLIP_DIR") or "./clips").strip(),
-    }
+    clip_dir = (environ.get("CLEARANCE_CLIP_DIR") or "").strip() or DEFAULT_CLIP_DIR
+    return Config(url=url, key=key, clip_dir=clip_dir)
 
 
-def clip_dir() -> str:
-    return (os.environ.get("CLEARANCE_CLIP_DIR") or "./clips").strip()
-
-
-def supabase_headers(key: str, *, json_body: bool = False) -> dict:
-    h = {"apikey": key, "Authorization": f"Bearer {key}"}
-    if json_body:
-        h["Content-Type"] = "application/json"
-    return h
-
-
-def request(method: str, url: str, headers: dict, body: bytes | None = None, timeout: int = 120):
-    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+def _default_session():
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            return resp.status, raw, dict(resp.headers)
-    except urllib.error.HTTPError as e:
-        raw = e.read()
-        return e.code, raw, dict(e.headers)
+        import requests
+    except ImportError:
+        raise BotError("The requests package is missing: pip install -r requirements.txt")
+    return requests.Session()
 
 
-def rest_get(env: dict, path_query: str):
-    status, raw, _ = request(
-        "GET",
-        f"{env['url']}/rest/v1/{path_query}",
-        supabase_headers(env["key"]),
-    )
-    if status >= 400:
-        raise BotError(f"Supabase GET failed ({status}): {raw.decode('utf-8', 'replace')[:500]}")
-    return json.loads(raw.decode() or "null")
+class Supabase:
+    """Minimal PostgREST + Storage client using the service role key."""
 
+    def __init__(self, config: Config, session=None, timeout=120):
+        self.config = config
+        self.session = session if session is not None else _default_session()
+        self.timeout = timeout
+        self.headers = {"apikey": config.key, "Authorization": f"Bearer {config.key}"}
 
-def rest_patch(env: dict, path_query: str, payload: dict):
-    status, raw, _ = request(
-        "PATCH",
-        f"{env['url']}/rest/v1/{path_query}",
-        {**supabase_headers(env["key"], json_body=True), "Prefer": "return=representation"},
-        json.dumps(payload).encode(),
-    )
-    if status >= 400:
-        raise BotError(f"Supabase PATCH failed ({status}): {raw.decode('utf-8', 'replace')[:500]}")
-    return json.loads(raw.decode() or "[]")
+    def _check(self, resp, what):
+        if resp.status_code >= 400:
+            raise BotError(f"{what} failed (HTTP {resp.status_code}): {resp.text[:300]}")
+        return resp
 
-
-def storage_download(env: dict, object_path: str) -> bytes:
-    # service role download from private bucket
-    enc = "/".join(urllib.parse.quote(p, safe="") for p in object_path.split("/"))
-    status, raw, _ = request(
-        "GET",
-        f"{env['url']}/storage/v1/object/{BUCKET}/{enc}",
-        supabase_headers(env["key"]),
-        timeout=180,
-    )
-    if status >= 400:
-        raise BotError(
-            f"Storage download failed ({status}) for {object_path!r}: "
-            f"{raw.decode('utf-8', 'replace')[:500]}"
+    def select(self, params):
+        resp = self.session.get(
+            f"{self.config.url}/rest/v1/{TABLE}",
+            params=params,
+            headers=self.headers,
+            timeout=self.timeout,
         )
-    return raw
+        return self._check(resp, "Reading submissions").json()
+
+    def update(self, filters, values):
+        """PATCH rows matching filters; returns the updated rows."""
+        resp = self.session.patch(
+            f"{self.config.url}/rest/v1/{TABLE}",
+            params=filters,
+            json=values,
+            headers={**self.headers, "Prefer": "return=representation"},
+            timeout=self.timeout,
+        )
+        return self._check(resp, "Updating submission").json()
+
+    def download(self, storage_path):
+        path = "/".join(quote(part, safe="") for part in storage_path.split("/"))
+        resp = self.session.get(
+            f"{self.config.url}/storage/v1/object/{BUCKET}/{path}",
+            headers=self.headers,
+            timeout=self.timeout,
+        )
+        return self._check(resp, f"Downloading {BUCKET}/{storage_path}").content
 
 
-def die(msg: str, code: int = 1) -> None:
-    print(msg, file=sys.stderr)
-    sys.exit(code)
+def run(main):
+    """Run a script entry point, turning BotError into a stderr line + exit 1."""
+    try:
+        sys.exit(main() or 0)
+    except BotError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
