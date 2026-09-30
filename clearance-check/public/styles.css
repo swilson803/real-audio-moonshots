@@ -435,6 +435,10 @@ h1, h2, h3, p { margin: 0; }
 .headline-label { color: var(--color-black); }
 .track-name { color: var(--color-red); }
 #footnote { color: var(--color-red); font-style: italic; }
+/* Reject3: PASSED / FAILED stamps (Spencer's art) in the headline and per platform. */
+.stamp { display: inline-block; width: auto; max-width: none; vertical-align: middle; }
+.stamp-headline { height: 1.3em; margin-left: 0.05em; }
+.stamp-platform { display: block; height: 32px; }
 .warning { font-size: 20px; line-height: 1.4; color: var(--color-red); }
 /* Landing: same warning box as the result page, form width, above the form. */
 .landing-warning { max-width: 448px; margin: 0 auto 24px; }

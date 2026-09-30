@@ -279,12 +279,13 @@ try {
   let navs = 0;
   page.on('framenavigated', () => navs++);
   await update({ id, status: 'checking', youtube_result: 'clear', youtube_note: 'no match' });
-  await page.waitForFunction(() => [...document.querySelectorAll('.platform-status')][0].textContent === 'Clear', null, { timeout: 10000 });
+  await page.waitForFunction(() => document.querySelector('.platform-status img.stamp')?.alt === 'Clear', null, { timeout: 10000 });
   await page.waitForFunction(() => {
     const el = document.querySelector('.platform[data-result="clear"] .platform-name');
     return el && getComputedStyle(el).color === 'rgb(229, 90, 60)';
   }, null, { timeout: 5000 });
-  const mid = await page.$$eval('.platform-status', (els) => els.map((e) => e.textContent));
+  // Reject3: a stamped status reads as its alt text.
+  const mid = await page.$$eval('.platform-status', (els) => els.map((e) => e.querySelector('img.stamp')?.alt ?? e.textContent));
   check('polls and updates without reload', navs === 0 && mid[0] === 'Clear' && mid[1] === 'Checking…', mid.join(' / '));
   const checkingSummary = await page.textContent('#summary');
   check('checking status folds email note into the updates line',
@@ -330,8 +331,8 @@ try {
   // never sends; only the cron does.
   await update({ id, status: 'done', tiktok_result: 'muted', tiktok_note: 'muted at 0:12', instagram_result: 'clear' });
   await page.waitForSelector('#verdict[data-flagged]', { timeout: 10000 });
-  const done = await page.$$eval('.platform-status', (els) => els.map((e) => e.textContent));
-  const verdict = await page.textContent('#verdict');
+  const done = await page.$$eval('.platform-status', (els) => els.map((e) => e.querySelector('img.stamp')?.alt ?? e.textContent));
+  const verdict = await page.$eval('#verdict', (el) => el.querySelector('img.stamp')?.alt ?? el.textContent);
   check('done row shows per-platform results', done.join('/') === 'Clear/Muted/Clear', done.join(' / '));
   check('flagged result reads FAILED', verdict === 'FAILED', verdict);
   // MS-004 Reject1 (Spencer): headline, track name, no verdict box, red italic email note, bigger CTA.
@@ -343,7 +344,7 @@ try {
     const foot = document.getElementById('footnote');
     const again = document.getElementById('again');
     return {
-      h1: document.querySelector('h1.headline').textContent,
+      h1: document.querySelector('h1.headline').textContent.trim(),
       labelColor: cs(label).color, labelSize: cs(label).fontSize, labelFont: cs(label).fontFamily,
       verdictColor: cs(v).color, verdictSize: cs(v).fontSize,
       track: track?.textContent, trackColor: track && cs(track).color,
@@ -354,8 +355,24 @@ try {
   });
   const h1Lines = await page.$eval('h1.headline', (el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
   check('headline on one line: black "Your result:" then red FAILED, same size, drawn font',
-    h1Lines === 1 && r1.h1 === 'Your result: FAILED' && r1.labelColor === 'rgb(26, 26, 26)' && r1.verdictColor === 'rgb(229, 90, 60)'
+    h1Lines === 1 && r1.h1 === 'Your result:' && r1.labelColor === 'rgb(26, 26, 26)' && r1.verdictColor === 'rgb(229, 90, 60)'
     && r1.labelSize === r1.verdictSize && /Patrick Hand/.test(r1.labelFont), JSON.stringify(r1));
+  // Reject3: Spencer's stamps replace PASSED/FAILED text in the headline and per platform.
+  await page.waitForFunction(() => [...document.querySelectorAll('img.stamp')].every((i) => i.complete && i.naturalWidth > 0));
+  const stamps = await page.evaluate(() => {
+    const h = document.querySelector('#verdict img.stamp');
+    const label = document.querySelector('h1.headline .headline-label').getBoundingClientRect();
+    const hr = h?.getBoundingClientRect();
+    return {
+      headline: h && { src: h.getAttribute('src'), alt: h.alt, h: hr.height, font: parseFloat(getComputedStyle(h.parentElement).fontSize), sameLine: hr.top < label.bottom && hr.bottom > label.top },
+      rows: [...document.querySelectorAll('.platform-status')].map((e) => { const i = e.querySelector('img.stamp'); return i ? `${i.getAttribute('src').split('/').pop()}:${i.alt}:${Math.round(i.getBoundingClientRect().height)}` : `text:${e.textContent}`; }),
+    };
+  });
+  check('headline stamp FAILED replaces text, same line as "Your result:"',
+    stamps.headline?.src === '/brand-assets/stamps/failed.webp' && stamps.headline.alt === 'FAILED' && stamps.headline.sameLine
+    && Math.abs(stamps.headline.h - stamps.headline.font * 1.3) < 2, JSON.stringify(stamps.headline));
+  check('platform rows: PASSED stamp for Clear, FAILED stamp for Muted',
+    stamps.rows.join() === 'passed.webp:Clear:32,failed.webp:Muted:32,passed.webp:Clear:32', stamps.rows.join(' | '));
   check('track name in brand red', r1.track === 'my song.mp3' && r1.trackColor === 'rgb(229, 90, 60)', JSON.stringify(r1));
   check('button-looking verdict box removed', !r1.box);
   check('"A copy is on its way to your email." brand red + italic',
@@ -510,7 +527,8 @@ try {
   p2.on('request', (r) => hosts.add(new URL(r.url()).host));
   await p2.goto(`${ORIGIN}/r/${fresh}`);
   await p2.waitForSelector('#verdict[data-flagged]');
-  check('all-clear result reads PASSED', (await p2.textContent('#verdict')) === 'PASSED');
+  const clearHead = await p2.$eval('#verdict img.stamp', (i) => `${i.getAttribute('src')}:${i.alt}`);
+  check('all-clear headline shows the PASSED stamp', clearHead === '/brand-assets/stamps/passed.webp:PASSED', clearHead);
   await p2.screenshot({ path: `${SHOTS}result-done-clear-1280.jpg`, fullPage: true, quality: 70 });
 
   // Breakpoints: no sideways scroll, warning + CTA visible.

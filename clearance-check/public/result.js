@@ -17,6 +17,24 @@ const LABEL = {
   error: 'Couldn’t check',
 };
 
+// Reject3: Spencer's PASSED / FAILED stamps replace the pass/fail text in the
+// headline and next to each platform. Alt text keeps the exact result.
+const STAMP = { passed: '/brand-assets/stamps/passed.webp', failed: '/brand-assets/stamps/failed.webp' };
+const STAMPED = { clear: 'passed', claimed: 'failed', muted: 'failed' };
+
+// Put a stamp in el (reusing it if it's already the same one).
+function setStamp(el, kind, alt, cls) {
+  const img = el.querySelector('img.stamp');
+  if (img && img.dataset.kind === kind && img.alt === alt) return;
+  const next = document.createElement('img');
+  next.className = `stamp ${cls}`;
+  next.src = STAMP[kind];
+  next.alt = alt;
+  next.title = alt;
+  next.dataset.kind = kind;
+  el.replaceChildren(next);
+}
+
 // One row per platform, built once and updated in place.
 const rows = {};
 for (const p of PLATFORMS) {
@@ -49,14 +67,15 @@ function render(row) {
     li.dataset.result = result || 'pending';
     const status = li.querySelector('.platform-status');
     status.dataset.result = result;
-    status.textContent = result === 'pending' && row.status === 'queued' ? 'Queued' : LABEL[result] || result;
+    if (STAMPED[result]) setStamp(status, STAMPED[result], LABEL[result], 'stamp-platform');
+    else status.textContent = result === 'pending' && row.status === 'queued' ? 'Queued' : LABEL[result] || result;
     li.querySelector('.platform-note').textContent = row[`${p.key}_note`] || '';
   }
 
   const allIn = PLATFORMS.every((p) => row[`${p.key}_result`] !== 'pending');
   if (allIn) {
     const v = verdictFor(row);
-    verdict.textContent = v.headline;
+    setStamp(verdict, v.flagged ? 'failed' : 'passed', v.headline, 'stamp-headline');
     verdict.dataset.flagged = String(v.flagged);
   } else {
     // Until all three are in, the red half of the headline is the progress.
