@@ -417,7 +417,7 @@ try {
   });
   check('hovering the FAILED stamp shows that platform\'s context in the branded tooltip',
     hovered.text === 'muted at 0:12' && hovered.opacity === '1' && /Patrick Hand/.test(hovered.font) && hovered.color === 'rgb(255, 248, 224)'
-    && hovered.bg === 'rgb(229, 90, 60)' && /frame-banner-heavy-red-filled/.test(hovered.border) && hovered.borderW === '5px'
+    && hovered.bg === 'rgb(229, 90, 60)' && /frame-card-heavy-black/.test(hovered.border) && hovered.borderW === '5px'
     && hovered.inView, JSON.stringify(hovered));
   await page.screenshot({ path: `${SHOTS}result-failed-hover-1280.jpg`, fullPage: true, quality: 70 });
   await page.mouse.move(0, 0);
