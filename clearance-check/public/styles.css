@@ -438,6 +438,9 @@ h1, h2, h3, p { margin: 0; }
 /* Reject3: PASSED / FAILED stamps (Spencer's art) in the headline and per platform. */
 .stamp { display: inline-block; width: auto; max-width: none; vertical-align: middle; }
 .stamp-headline { height: 1.3em; margin-left: 0.05em; }
+/* Reject4: vertical-align: middle leaves the stamp ~0.14em below the centre of
+   the "Your result:" glyphs; lift it to almost centred without moving the line. */
+.stamp-headline { position: relative; top: -0.12em; }
 .stamp-platform { display: block; height: 32px; }
 .warning { font-size: 20px; line-height: 1.4; color: var(--color-red); }
 /* Landing: same warning box as the result page, form width, above the form. */

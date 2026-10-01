@@ -53,6 +53,23 @@ const insertRow = async (email, extra = {}) => {
 const ALL_CLEAR = { youtube_result: 'clear', tiktok_result: 'clear', instagram_result: 'clear' };
 const emailsTo = async (to) => (await state()).emails.filter((e) => e.to[0] === to);
 const rowOf = async (rid) => (await state()).rows.find((r) => r.id === rid);
+// Reject4: headline stamp centre minus the "Your result:" glyph centre, in em
+// of the headline size (positive = stamp sits low).
+const stampOffsetEm = (p) => p.evaluate(() => {
+  const label = document.querySelector('h1.headline .headline-label');
+  const cs = getComputedStyle(label);
+  const probe = document.createElement('span');
+  probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+  label.appendChild(probe);
+  const baseline = probe.getBoundingClientRect().bottom;
+  probe.remove();
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  const m = ctx.measureText(label.textContent);
+  const textMid = baseline - (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+  const r = document.querySelector('#verdict img.stamp').getBoundingClientRect();
+  return ((r.top + r.bottom) / 2 - textMid) / parseFloat(cs.fontSize);
+});
 
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -371,6 +388,9 @@ try {
   check('headline stamp FAILED replaces text, same line as "Your result:"',
     stamps.headline?.src === '/brand-assets/stamps/failed.webp' && stamps.headline.alt === 'FAILED' && stamps.headline.sameLine
     && Math.abs(stamps.headline.h - stamps.headline.font * 1.3) < 2, JSON.stringify(stamps.headline));
+  await page.evaluate(() => document.fonts.ready);
+  const off1280 = await stampOffsetEm(page);
+  check('headline stamp almost centred on "Your result:" (within 0.04em)', Math.abs(off1280) <= 0.04, `${off1280.toFixed(3)}em`);
   check('platform rows: PASSED stamp for Clear, FAILED stamp for Muted',
     stamps.rows.join() === 'passed.webp:Clear:32,failed.webp:Muted:32,passed.webp:Clear:32', stamps.rows.join(' | '));
   check('track name in brand red', r1.track === 'my song.mp3' && r1.trackColor === 'rgb(229, 90, 60)', JSON.stringify(r1));
@@ -545,6 +565,9 @@ try {
     const o2 = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     await p.screenshot({ path: `${SHOTS}result-${w}.jpg`, fullPage: true, quality: 70 });
     check(`no horizontal overflow at ${w}`, o1 <= 0 && o2 <= 0, `landing ${o1}, result ${o2}`);
+    await p.evaluate(() => document.fonts.ready);
+    const off = await stampOffsetEm(p);
+    check(`headline stamp almost centred at ${w}`, Math.abs(off) <= 0.04, `${off.toFixed(3)}em`);
     await p.close();
   }
 
