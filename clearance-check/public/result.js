@@ -35,6 +35,42 @@ function setStamp(el, kind, alt, cls) {
   el.replaceChildren(next);
 }
 
+// Reject5: a platform's FAILED stamp carries that platform's context (the bot's
+// note, else the result) in Creator's branded hover tooltip (.download-nudge-tip,
+// re-anchored like its .source-badge-tip). Touch has no :hover, so a tap toggles
+// it open, and a tap anywhere else closes it (same as Creator's SourceBadge).
+function setFailedStamp(el, alt, context) {
+  const btn = el.querySelector('.platform-stamp');
+  if (btn && btn.dataset.alt === alt && btn.dataset.context === context) return;
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'platform-stamp';
+  next.dataset.alt = alt;
+  next.dataset.context = context;
+  const img = document.createElement('img');
+  img.className = 'stamp stamp-platform';
+  img.src = STAMP.failed;
+  img.alt = alt;
+  img.dataset.kind = 'failed';
+  const tip = document.createElement('span');
+  tip.className = 'download-nudge-tip platform-stamp-tip';
+  tip.setAttribute('role', 'tooltip');
+  tip.textContent = context;
+  next.append(img, tip);
+  next.setAttribute('aria-label', `${alt}: ${context}`);
+  next.addEventListener('click', () => {
+    const open = !next.classList.contains('is-open');
+    document.querySelectorAll('.platform-stamp.is-open').forEach((b) => b.classList.remove('is-open'));
+    next.classList.toggle('is-open', open);
+  });
+  el.replaceChildren(next);
+}
+document.addEventListener('pointerdown', (e) => {
+  document.querySelectorAll('.platform-stamp.is-open').forEach((b) => {
+    if (!b.contains(e.target)) b.classList.remove('is-open');
+  });
+});
+
 // One row per platform, built once and updated in place.
 const rows = {};
 for (const p of PLATFORMS) {
@@ -52,8 +88,7 @@ for (const p of PLATFORMS) {
       `<img class="platform-icon" src="/icons-runtime/platform-${p.key}.webp" alt="">` +
       `<span class="platform-name"></span>` +
     `</span>` +
-    `<span class="platform-status"></span>` +
-    `<span class="platform-note"></span>`;
+    `<span class="platform-status"></span>`;
   li.querySelector('.platform-name').textContent = p.name;
   list.appendChild(li);
   rows[p.key] = li;
@@ -67,9 +102,9 @@ function render(row) {
     li.dataset.result = result || 'pending';
     const status = li.querySelector('.platform-status');
     status.dataset.result = result;
-    if (STAMPED[result]) setStamp(status, STAMPED[result], LABEL[result], 'stamp-platform');
+    if (STAMPED[result] === 'failed') setFailedStamp(status, LABEL[result], row[`${p.key}_note`] || LABEL[result]);
+    else if (STAMPED[result]) setStamp(status, STAMPED[result], LABEL[result], 'stamp-platform');
     else status.textContent = result === 'pending' && row.status === 'queued' ? 'Queued' : LABEL[result] || result;
-    li.querySelector('.platform-note').textContent = row[`${p.key}_note`] || '';
   }
 
   const allIn = PLATFORMS.every((p) => row[`${p.key}_result`] !== 'pending');

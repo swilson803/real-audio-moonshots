@@ -393,6 +393,35 @@ try {
   check('headline stamp almost centred on "Your result:" (within 0.04em)', Math.abs(off1280) <= 0.04, `${off1280.toFixed(3)}em`);
   check('platform rows: PASSED stamp for Clear, FAILED stamp for Muted',
     stamps.rows.join() === 'passed.webp:Clear:32,failed.webp:Muted:32,passed.webp:Clear:32', stamps.rows.join(' | '));
+  // Reject5: platform context only on the FAILED stamp's hover, never under the row.
+  const tipState = () => page.evaluate(() => [...document.querySelectorAll('.platform')].map((li) => {
+    const tip = li.querySelector('.platform-stamp-tip');
+    return { name: li.querySelector('.platform-name').textContent, tip: tip?.textContent ?? null, opacity: tip ? getComputedStyle(tip).opacity : null };
+  }));
+  const before = await tipState();
+  // Text visible in the row, leaving out the (hidden until hover) tooltip.
+  const rowText = await page.$$eval('.platform', (els) => els.map((e) => {
+    const c = e.cloneNode(true);
+    c.querySelectorAll('.platform-stamp-tip').forEach((t) => t.remove());
+    return c.textContent.replace(/\s+/g, ' ').trim();
+  }));
+  check('no platform context under the rows',
+    !(await page.$('.platform-note')) && rowText.every((t) => !/no match|muted at/.test(t)), rowText.join(' | '));
+  check('only FAILED stamps carry context; hidden until hover',
+    before.map((r) => `${r.name}:${r.tip}:${r.opacity}`).join() === 'YouTube:null:null,TikTok:muted at 0:12:0,Instagram:null:null', JSON.stringify(before));
+  await page.hover('.platform[data-result="muted"] .platform-stamp');
+  await page.waitForTimeout(250);
+  const hovered = await page.$eval('.platform[data-result="muted"] .platform-stamp-tip', (t) => {
+    const cs = getComputedStyle(t); const r = t.getBoundingClientRect();
+    return { text: t.textContent, opacity: cs.opacity, font: cs.fontFamily, color: cs.color, bg: cs.backgroundImage, inView: r.left >= 0 && r.right <= innerWidth && r.top >= 0 };
+  });
+  check('hovering the FAILED stamp shows that platform\'s context in the branded tooltip',
+    hovered.text === 'muted at 0:12' && hovered.opacity === '1' && /Patrick Hand/.test(hovered.font) && hovered.color === 'rgb(255, 248, 224)'
+    && /frame-banner-heavy-red-filled/.test(hovered.bg) && hovered.inView, JSON.stringify(hovered));
+  await page.screenshot({ path: `${SHOTS}result-failed-hover-1280.jpg`, fullPage: true, quality: 70 });
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(250);
+  check('tooltip hides again off hover', (await page.$eval('.platform-stamp-tip', (t) => getComputedStyle(t).opacity)) === '0');
   check('track name in brand red', r1.track === 'my song.mp3' && r1.trackColor === 'rgb(229, 90, 60)', JSON.stringify(r1));
   check('button-looking verdict box removed', !r1.box);
   check('"A copy is on its way to your email." brand red + italic',
@@ -568,6 +597,18 @@ try {
     await p.evaluate(() => document.fonts.ready);
     const off = await stampOffsetEm(p);
     check(`headline stamp almost centred at ${w}`, Math.abs(off) <= 0.04, `${off.toFixed(3)}em`);
+    if (w === 375) {
+      // Touch: a tap opens the context, a tap elsewhere closes it; stays on screen.
+      await p.tap?.('.platform-stamp').catch(() => {});
+      if (!(await p.$eval('.platform-stamp', (b) => b.classList.contains('is-open')))) await p.click('.platform-stamp');
+      await p.waitForTimeout(250);
+      const t = await p.$eval('.platform-stamp-tip', (el) => { const r = el.getBoundingClientRect(); return { o: getComputedStyle(el).opacity, l: r.left, r: r.right }; });
+      await p.screenshot({ path: `${SHOTS}result-failed-tap-375.jpg`, fullPage: true, quality: 70 });
+      await p.mouse.click(5, 300);
+      await p.waitForTimeout(250);
+      const closed = await p.$eval('.platform-stamp', (b) => !b.classList.contains('is-open'));
+      check('375: tap opens FAILED context on screen, tap elsewhere closes', t.o === '1' && t.l >= 0 && t.r <= 375 && closed, JSON.stringify(t));
+    }
     await p.close();
   }
 
