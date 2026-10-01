@@ -491,7 +491,22 @@ h1, h2, h3, p { margin: 0; }
   outline: 2px solid hsl(var(--brand-accent));
   outline-offset: 2px;
 }
+/* Reject6: CF's tip chrome held up at this size: an opaque bubble with the
+   banner's sketched ink edge. The banner asset is drawn as a border image the
+   way Creator's .banner-sketched draws it small (fill + outset), sliced at 40
+   so the double ink line stays crisp at a 5px border, over solid brand red,
+   instead of stretching the whole asset as a background (which thins the edge
+   away and lets the cream show through). */
 .platform-stamp-tip {
+  background: var(--color-red);
+  background-clip: padding-box;
+  border-image-source: url('/brand-assets/frames/frame-banner-heavy-red-filled.webp');
+  border-image-slice: 40 fill;
+  border-image-repeat: stretch;
+  border-width: 5px;
+  border-style: solid;
+  border-image-outset: 1px;
+  padding: 4px 8px 6px;
   left: auto;
   right: 0;
   transform-origin: right bottom;
@@ -502,8 +517,11 @@ h1, h2, h3, p { margin: 0; }
   line-height: 1.15;
   text-align: center;
 }
-/* Tail under the stamp, not under the right-pinned bubble's centre. */
+/* Tail under the stamp, not under the right-pinned bubble's centre; solid red
+   under its crosshatch like the bubble. */
 .platform-stamp-tip::after {
+  background-color: var(--color-red);
+  top: calc(100% - 2px);
   left: auto;
   right: 28px;
   transform: rotate(45deg);

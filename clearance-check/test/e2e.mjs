@@ -410,14 +410,15 @@ try {
   check('only FAILED stamps carry context; hidden until hover',
     before.map((r) => `${r.name}:${r.tip}:${r.opacity}`).join() === 'YouTube:null:null,TikTok:muted at 0:12:0,Instagram:null:null', JSON.stringify(before));
   await page.hover('.platform[data-result="muted"] .platform-stamp');
-  await page.waitForTimeout(250);
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.platform[data-result="muted"] .platform-stamp-tip')).opacity === '1', null, { timeout: 2000 }).catch(() => {});
   const hovered = await page.$eval('.platform[data-result="muted"] .platform-stamp-tip', (t) => {
     const cs = getComputedStyle(t); const r = t.getBoundingClientRect();
-    return { text: t.textContent, opacity: cs.opacity, font: cs.fontFamily, color: cs.color, bg: cs.backgroundImage, inView: r.left >= 0 && r.right <= innerWidth && r.top >= 0 };
+    return { text: t.textContent, opacity: cs.opacity, font: cs.fontFamily, color: cs.color, bg: cs.backgroundColor, border: cs.borderImageSource, borderW: cs.borderTopWidth, inView: r.left >= 0 && r.right <= innerWidth && r.top >= 0 };
   });
   check('hovering the FAILED stamp shows that platform\'s context in the branded tooltip',
     hovered.text === 'muted at 0:12' && hovered.opacity === '1' && /Patrick Hand/.test(hovered.font) && hovered.color === 'rgb(255, 248, 224)'
-    && /frame-banner-heavy-red-filled/.test(hovered.bg) && hovered.inView, JSON.stringify(hovered));
+    && hovered.bg === 'rgb(229, 90, 60)' && /frame-banner-heavy-red-filled/.test(hovered.border) && hovered.borderW === '5px'
+    && hovered.inView, JSON.stringify(hovered));
   await page.screenshot({ path: `${SHOTS}result-failed-hover-1280.jpg`, fullPage: true, quality: 70 });
   await page.mouse.move(0, 0);
   await page.waitForTimeout(250);
@@ -601,7 +602,7 @@ try {
       // Touch: a tap opens the context, a tap elsewhere closes it; stays on screen.
       await p.tap?.('.platform-stamp').catch(() => {});
       if (!(await p.$eval('.platform-stamp', (b) => b.classList.contains('is-open')))) await p.click('.platform-stamp');
-      await p.waitForTimeout(250);
+      await p.waitForFunction(() => getComputedStyle(document.querySelector('.platform-stamp-tip')).opacity === '1', null, { timeout: 2000 }).catch(() => {});
       const t = await p.$eval('.platform-stamp-tip', (el) => { const r = el.getBoundingClientRect(); return { o: getComputedStyle(el).opacity, l: r.left, r: r.right }; });
       await p.screenshot({ path: `${SHOTS}result-failed-tap-375.jpg`, fullPage: true, quality: 70 });
       await p.mouse.click(5, 300);
