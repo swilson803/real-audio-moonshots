@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Music in this video | Real Audio</title>
+  <meta name="description" content="Upload your finished video and get one link that credits the Real Audio music in it.">
+  <link rel="icon" href="/music/favicon.ico">
+  <link rel="stylesheet" href="/music/styles.css?v=ms006-1">
+</head>
+<body>
+  <div class="page surface-sketched">
+    <nav class="nav">
+      <div class="nav-inner">
+        <a href="https://library.real.audio">
+          <img class="nav-logo nav-logo--mobile" src="/music/brand-assets/logo/logo-mobile.webp" alt="Real Audio">
+          <img class="nav-logo nav-logo--desktop" src="/music/brand-assets/logo/logo.webp" alt="Real Audio">
+        </a>
+      </div>
+      <img class="nav-line" src="/music/brand-assets/lines/line-medium-black.webp" alt="">
+    </nav>
+
+    <main class="main">
+      <div class="container">
+        <div class="narrow">
+          <h1 class="headline"><img class="headline-img" src="/music/brand-assets/logo/music-in-this-video.png" alt="Music in this video" width="1967" height="252"></h1>
+          <p class="lead">Upload your finished video. We’ll find the Real Audio music in it and give you one link to credit it.</p>
+
+          <form id="scan-form" class="my-login-modal check-form" novalidate>
+            <div class="field">
+              <label class="btn-primary-cta btn-block file-pick" id="file-pick"><span class="file-pick-label">CHOOSE VIDEO</span><input class="file-input" type="file" id="file" name="file"
+                     accept=".mp4,.mov,.m4v,.webm,video/mp4,video/quicktime,video/x-m4v,video/webm"
+                     aria-label="Choose video file" aria-describedby="file-hint file-error"></label>
+              <p class="file-name" id="file-name">No file chosen</p>
+              <p class="text-caption text-mono field-hint file-hint" id="file-hint">MP4, MOV, M4V or WebM, up to 20 minutes. Your video stays on your device.</p>
+              <p class="text-label field-error file-error" id="file-error" role="alert"></p>
+            </div>
+
+            <p class="text-label center scan-status" id="status" aria-live="polite"></p>
+            <p class="text-label field-error center" id="form-error" role="alert"></p>
+
+            <div class="my-login-buttons">
+              <button class="btn-primary-cta btn-block" type="submit" id="submit">FIND MY MUSIC</button>
+            </div>
+          </form>
+
+          <section class="stack" id="found" hidden>
+            <p class="lead result-lead" id="found-summary"></p>
+            <div class="box-sketched-light copy-box">
+              <p class="copy-line" id="copy-line"></p>
+              <button class="btn-primary-cta copy-btn" type="button" id="copy">COPY</button>
+            </div>
+            <div class="actions">
+              <a class="btn-primary-cta" id="open-result" href="/music/">see your tracks</a>
+              <a class="btn-default" href="/music/">check another video</a>
+            </div>
+          </section>
+
+          <section class="stack" id="none" hidden>
+            <p class="lead result-lead">We didn’t find any Real Audio music in this video.</p>
+            <div class="actions">
+              <a class="btn-primary-cta" href="/music/">check another video</a>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="/music/app.js?v=ms006-1" type="module"></script>
+</body>
+</html>
