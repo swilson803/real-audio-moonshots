@@ -4,7 +4,6 @@ const POLL_MS = 4000;
 const id = decodeURIComponent(location.pathname.split('/')[2] || '');
 const $ = (x) => document.getElementById(x);
 const summary = $('summary');
-const verdictBox = $('verdict-box');
 const verdict = $('verdict');
 const platformsBox = $('platforms-box');
 const list = $('platforms');
@@ -17,6 +16,60 @@ const LABEL = {
   muted: 'Muted',
   error: 'Couldn’t check',
 };
+
+// Reject3: Spencer's PASSED / FAILED stamps replace the pass/fail text in the
+// headline and next to each platform. Alt text keeps the exact result.
+const STAMP = { passed: '/brand-assets/stamps/passed.webp', failed: '/brand-assets/stamps/failed.webp' };
+const STAMPED = { clear: 'passed', claimed: 'failed', muted: 'failed' };
+
+// Put a stamp in el (reusing it if it's already the same one).
+function setStamp(el, kind, alt, cls) {
+  const img = el.querySelector('img.stamp');
+  if (img && img.dataset.kind === kind && img.alt === alt) return;
+  const next = document.createElement('img');
+  next.className = `stamp ${cls}`;
+  next.src = STAMP[kind];
+  next.alt = alt;
+  next.title = alt;
+  next.dataset.kind = kind;
+  el.replaceChildren(next);
+}
+
+// Reject5: a platform's FAILED stamp carries that platform's context (the bot's
+// note, else the result) in Creator's branded hover tooltip (.download-nudge-tip,
+// re-anchored like its .source-badge-tip). Touch has no :hover, so a tap toggles
+// it open, and a tap anywhere else closes it (same as Creator's SourceBadge).
+function setFailedStamp(el, alt, context) {
+  const btn = el.querySelector('.platform-stamp');
+  if (btn && btn.dataset.alt === alt && btn.dataset.context === context) return;
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'platform-stamp';
+  next.dataset.alt = alt;
+  next.dataset.context = context;
+  const img = document.createElement('img');
+  img.className = 'stamp stamp-platform';
+  img.src = STAMP.failed;
+  img.alt = alt;
+  img.dataset.kind = 'failed';
+  const tip = document.createElement('span');
+  tip.className = 'download-nudge-tip platform-stamp-tip';
+  tip.setAttribute('role', 'tooltip');
+  tip.textContent = context;
+  next.append(img, tip);
+  next.setAttribute('aria-label', `${alt}: ${context}`);
+  next.addEventListener('click', () => {
+    const open = !next.classList.contains('is-open');
+    document.querySelectorAll('.platform-stamp.is-open').forEach((b) => b.classList.remove('is-open'));
+    next.classList.toggle('is-open', open);
+  });
+  el.replaceChildren(next);
+}
+document.addEventListener('pointerdown', (e) => {
+  document.querySelectorAll('.platform-stamp.is-open').forEach((b) => {
+    if (!b.contains(e.target)) b.classList.remove('is-open');
+  });
+});
 
 // One row per platform, built once and updated in place.
 const rows = {};
@@ -35,14 +88,11 @@ for (const p of PLATFORMS) {
       `<img class="platform-icon" src="/icons-runtime/platform-${p.key}.webp" alt="">` +
       `<span class="platform-name"></span>` +
     `</span>` +
-    `<span class="platform-status"></span>` +
-    `<span class="platform-note"></span>`;
+    `<span class="platform-status"></span>`;
   li.querySelector('.platform-name').textContent = p.name;
   list.appendChild(li);
   rows[p.key] = li;
 }
-
-let notified = false;
 
 function render(row) {
   platformsBox.hidden = false;
@@ -52,25 +102,35 @@ function render(row) {
     li.dataset.result = result || 'pending';
     const status = li.querySelector('.platform-status');
     status.dataset.result = result;
-    status.textContent = result === 'pending' && row.status === 'queued' ? 'Queued' : LABEL[result] || result;
-    li.querySelector('.platform-note').textContent = row[`${p.key}_note`] || '';
+    if (STAMPED[result] === 'failed') setFailedStamp(status, LABEL[result], row[`${p.key}_note`] || LABEL[result]);
+    else if (STAMPED[result]) setStamp(status, STAMPED[result], LABEL[result], 'stamp-platform');
+    else status.textContent = result === 'pending' && row.status === 'queued' ? 'Queued' : LABEL[result] || result;
   }
 
   const allIn = PLATFORMS.every((p) => row[`${p.key}_result`] !== 'pending');
   if (allIn) {
     const v = verdictFor(row);
-    verdict.textContent = v.text;
+    setStamp(verdict, v.flagged ? 'failed' : 'passed', v.headline, 'stamp-headline');
     verdict.dataset.flagged = String(v.flagged);
-    verdictBox.hidden = false;
   } else {
-    verdictBox.hidden = true;
+    // Until all three are in, the red half of the headline is the progress.
+    verdict.textContent = row.status === 'failed' ? LABEL.error : row.status === 'queued' ? 'Queued' : LABEL.pending;
+    delete verdict.dataset.flagged;
   }
 
   if (row.status === 'failed') {
     summary.textContent = 'The check didn’t finish. Try uploading again.';
     footnote.textContent = '';
   } else if (row.status === 'done') {
-    summary.textContent = row.original_filename ? `Results for ${row.original_filename}` : 'Results are in.';
+    if (row.original_filename) {
+      // Reject1: track name in brand red.
+      const track = document.createElement('span');
+      track.className = 'track-name';
+      track.textContent = row.original_filename;
+      summary.replaceChildren('Results for ', track);
+    } else {
+      summary.textContent = 'Results are in.';
+    }
     footnote.textContent = 'A copy is on its way to your email.';
   } else {
     // Reject9: fold email note into the status line (no separate footnote).
@@ -80,17 +140,6 @@ function render(row) {
     summary.textContent = base + ' We’ll email you when all three are in.';
     footnote.textContent = '';
   }
-
-  // The Worker sends the email once (status done + emailed_at null, then sets
-  // emailed_at). Asking again on reload is harmless: it no-ops.
-  if (row.status === 'done' && !row.emailed_at && !notified) {
-    notified = true;
-    fetch('/api/notify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    }).catch(() => { notified = false; });
-  }
 }
 
 async function poll() {
@@ -99,7 +148,7 @@ async function poll() {
     const { supabaseUrl, anonKey } = await getConfig();
     const res = await fetch(
       `${supabaseUrl}/rest/v1/submissions?id=eq.${encodeURIComponent(id)}` +
-        '&select=status,original_filename,emailed_at,youtube_result,youtube_note,tiktok_result,tiktok_note,instagram_result,instagram_note',
+        '&select=status,original_filename,youtube_result,youtube_note,tiktok_result,tiktok_note,instagram_result,instagram_note',
       { headers: { ...supabaseHeaders(anonKey), 'x-submission-id': id }, cache: 'no-store' },
     );
     if (!res.ok) throw new Error(`select ${res.status}`);

@@ -43,14 +43,31 @@ export const env = {
     ? { SUPABASE_PUBLISHABLE_KEY: KEYS.anon, SUPABASE_SECRET_KEY: KEYS.service }
     : { SUPABASE_ANON_KEY: KEYS.anon, SUPABASE_SERVICE_ROLE_KEY: KEYS.service }),
   RESEND_API_KEY: 're_test',
+  // Fake site origin: result links in emails must come from SITE_URL, never
+  // from a request (the cron has none).
+  SITE_URL: 'https://clearance.test',
 };
 
-// Fake Resend for the Worker's outbound fetch.
+// Run the Worker's cron once and wait for everything it scheduled.
+export async function runCron(e = env) {
+  const jobs = [];
+  await worker.scheduled({ cron: '* * * * *' }, e, { waitUntil: (p) => jobs.push(p) });
+  await Promise.all(jobs);
+}
+
+// Fake Resend for the Worker's outbound fetch. failResend(n) makes the next n
+// sends fail with a 500 (nothing delivered).
+let resendFailures = 0;
+export const failResend = (n) => { resendFailures = n; };
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input.url;
   if (url.startsWith('https://api.resend.com/')) {
-    state.emails.push(JSON.parse(init.body));
+    if (resendFailures > 0) {
+      resendFailures--;
+      return new Response(JSON.stringify({ message: 'fake outage' }), { status: 500 });
+    }
+    state.emails.push({ ...JSON.parse(init.body), idempotencyKey: init.headers?.['Idempotency-Key'] ?? null });
     return new Response(JSON.stringify({ id: `email_${state.emails.length}` }), { status: 200 });
   }
   return realFetch(input, init);

@@ -371,7 +371,6 @@ h1, h2, h3, p { margin: 0; }
 .page .file-name,
 .page .file-hint,
 .page .platform-status,
-.page .platform-note,
 .page .text-mono {
   font-family: var(--font-display);
 }
@@ -428,11 +427,113 @@ h1, h2, h3, p { margin: 0; }
 .platform-status[data-result="muted"],
 .platform-status[data-result="error"] { color: var(--color-red); }
 .platform-status[data-result="pending"] { color: var(--color-black); }
-.platform-note { flex-basis: 100%; font-size: 12px; color: rgba(26, 26, 26, 0.8); }
-.platform-note:empty { display: none; }
-.verdict { font-size: 28px; line-height: 1.2; text-align: center; }
-.verdict[data-flagged="true"] { color: var(--color-red); }
-@media (min-width: 768px) { .verdict { font-size: 40px; } }
+/* Reject1: headline is black "Your result:" + the verdict in brand red at the
+   same size (the verdict box is gone); track name red; email note red italic. */
+.headline-label { color: var(--color-black); }
+.track-name { color: var(--color-red); }
+#footnote { color: var(--color-red); font-style: italic; }
+/* Reject3: PASSED / FAILED stamps (Spencer's art) in the headline and per platform. */
+.stamp { display: inline-block; width: auto; max-width: none; vertical-align: middle; }
+.stamp-headline { height: 1.3em; margin-left: 0.05em; }
+/* Reject4: vertical-align: middle leaves the stamp ~0.14em below the centre of
+   the "Your result:" glyphs; lift it to almost centred without moving the line. */
+.stamp-headline { position: relative; top: -0.12em; }
+.stamp-platform { display: block; height: 32px; }
+
+/* Reject5: platform context on hover of the FAILED stamp, not under the row.
+   COPIED from real-audio-creator src/index.css (.download-nudge-tip: the
+   branded hover tooltip, red hand-drawn banner + cream Patrick Hand), then
+   re-anchored the way Creator's .source-badge-tip is: the stamp sits at the
+   row's RIGHT edge, so the bubble is pinned there and grows left, wrapping
+   rather than running off a 375px screen. */
+.download-nudge-tip {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%) translateY(3px) rotate(-2deg) scale(0.96);
+  transform-origin: center bottom;
+  background: url('/brand-assets/frames/frame-banner-heavy-red-filled.webp')
+    center / 100% 100% no-repeat;
+  color: #FFF8E0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 8px 12px 11px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 40;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.download-nudge-tip::after {
+  content: "";
+  position: absolute;
+  top: calc(100% - 9px);
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translateX(-50%) rotate(45deg);
+  background: url('/brand-assets/frames/frame-banner-heavy-red-filled.webp')
+    center / 46px 46px no-repeat;
+  z-index: -1;
+}
+.platform-stamp {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+}
+.platform-stamp:focus-visible {
+  outline: 2px solid hsl(var(--brand-accent));
+  outline-offset: 2px;
+}
+/* Reject6/7: opaque bubble (the tip's banner crosshatch over solid brand red)
+   with Creator's brand-black sketched outline: the frame TrackKebabMenu.tsx
+   gives its small brand-sketched popover (frame-card-heavy-black at 5px, slice
+   100, stretch, no outset, so the ink clamps to the edge). */
+.platform-stamp-tip {
+  background: url('/brand-assets/frames/frame-banner-heavy-red-filled.webp')
+    center / 100% 100% no-repeat, var(--color-red);
+  background-clip: padding-box;
+  border-image-source: url('/brand-assets/frames/frame-card-heavy-black.webp');
+  border-image-slice: 100;
+  border-image-repeat: stretch;
+  border-width: 5px;
+  border-style: solid;
+  padding: 4px 8px 6px;
+  left: auto;
+  right: 0;
+  transform-origin: right bottom;
+  transform: translateY(3px) rotate(-2deg) scale(0.96);
+  white-space: normal;
+  width: max-content;
+  max-width: min(220px, calc(100vw - 40px));
+  line-height: 1.15;
+  text-align: center;
+}
+/* Tail under the stamp, not under the right-pinned bubble's centre; solid red
+   under its crosshatch like the bubble, with the outline's brand black on its
+   two outer edges so it reads as part of the framed bubble. */
+.platform-stamp-tip::after {
+  background-color: var(--color-red);
+  border-right: 3px solid var(--color-black);
+  border-bottom: 3px solid var(--color-black);
+  top: calc(100% - 4px);
+  left: auto;
+  right: 28px;
+  transform: rotate(45deg);
+}
+/* Desktop hover; keyboard focus; `.is-open` is the tap toggle for touch. */
+.platform-stamp:hover .platform-stamp-tip,
+.platform-stamp:focus-visible .platform-stamp-tip,
+.platform-stamp.is-open .platform-stamp-tip {
+  opacity: 1;
+  transform: translateY(0) rotate(-2deg) scale(1);
+}
 .warning { font-size: 20px; line-height: 1.4; color: var(--color-red); }
 /* Landing: same warning box as the result page, form width, above the form. */
 .landing-warning { max-width: 448px; margin: 0 auto 24px; }
@@ -440,6 +541,8 @@ h1, h2, h3, p { margin: 0; }
 .center { text-align: center; }
 [hidden] { display: none !important; }
 a.btn-default, a.btn-primary-cta { text-decoration: none; }
+/* Reject1: result "upload another track" slightly bigger than the base CTA (16px). */
+.actions .btn-primary-cta { font-size: 20px; padding: var(--space-4) var(--space-8); }
 /* Reject9: result "upload another track" — red at rest + hover; only slight expand */
 .actions .btn-primary-cta:hover {
   transform: scale(1.04);
