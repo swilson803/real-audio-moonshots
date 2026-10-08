@@ -73,6 +73,7 @@ function fakeMoonshots() {
   const write = async (path, { method = 'GET', body } = {}) => {
     if (path.startsWith('ms006_catalog?select')) return [...db.catalog.values()];
     if (path.startsWith('ms006_catalog') && method === 'POST') { db.catalog.set(body.tid, body); return null; }
+    if (path.startsWith('ms006_catalog?tid=eq.') && method === 'PATCH') { Object.assign(db.catalog.get(Number(path.split('eq.')[1])), body); return null; }
     if (path.startsWith('ms006_catalog') && method === 'DELETE') {
       const tids = path.match(/\d+/g).map(Number);
       for (const t of tids) db.catalog.delete(t);
@@ -119,7 +120,7 @@ test('index builder: production only GETs; moonshots gets catalog rows and finge
 test('index builder stops before the row budget, writing nothing for the track that would cross it', async () => {
   catalogPage.splice(1, 0, { track_id: 'a2', name: 'RA_TEST_Two', track_ref: `${PROD_TRACKS_PREFIX}tracks/u/2.wav`, duration_seconds: 20, Albums: { Artists: { name: 'RA_TEST_Artist', status: 'active' } } });
   const { db, write } = fakeMoonshots();
-  const oneTrack = (await buildIndex({ read: fakeRead([]), write: fakeMoonshots().write, decode, limit: 1, log: () => {} })).rows;
+  const oneTrack = (await buildIndex({ read: fakeRead([]), write: fakeMoonshots().write, decode, limit: 1, log: () => {} })).total_fp_rows;
   await assert.rejects(
     buildIndex({ read: fakeRead([]), write, decode, maxRows: oneTrack + 10, log: () => {} }),
     /index budget: RA_TEST_Artist - RA_TEST_Two/,

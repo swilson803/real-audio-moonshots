@@ -20,28 +20,41 @@ const MIN_BIN_HITS = 2;
 // Under Supabase's default 1000-row cap on API responses.
 const MAX_CLUSTERS = 500;
 
-// Stage 1: hashes on one alignment needed to become a candidate.
-const CANDIDATE_HITS = 5;
-const MAX_CANDIDATES = 8;
-// Hits on one alignment further apart than this are two uses of the track.
-// (A track restarted later is a different alignment, so it is two rows
-// anyway; this only splits a track that went silent for a long stretch.
-// Shorter gaps are speech masking a quiet bed, not a new use.)
-const SPLIT_GAP_FRAMES = Math.round(30 * FRAMES_PER_SEC);
-// Stage 2: peak coincidences in a VERIFY_WINDOW must reach VERIFY_MIN to mark
-// where the track is audible; a segment needs SEGMENT_MIN_COINCIDENCES in all.
-const VERIFY_WINDOW = Math.round(2 * FRAMES_PER_SEC);
-const VERIFY_MIN = 4;
-const EDGE_NEAR = Math.round(1 * FRAMES_PER_SEC);
-const OWNER_SMOOTH = 2; // seconds either side when deciding which alignment owns a second
-const EDGE_FAR = Math.round(2 * FRAMES_PER_SEC);
-const SEGMENT_MIN_COINCIDENCES = 12;
-// Off-alignment shifts (frames, not multiples of a common beat) for the
-// chance level, and how far above it a match must be.
-const NULL_SHIFTS = [37, 61, 97, 131, 173, 211, -41, -67, -103, -139, -181, -223];
-const NULL_RATIO = 7;
-// How far past a candidate's first and last hash the true start/end may lie.
-const REFINE_REACH_FRAMES = Math.round(20 * FRAMES_PER_SEC);
+// Tunables. match(query, deps, options) can override any of them (round-B
+// tuning, scripts/tune.mjs); these values are the defaults. DELTA_BIN,
+// MIN_BIN_HITS and MAX_CLUSTERS above are not tunable: Postgres applies them.
+export const TUNABLES = Object.freeze({
+  // Stage 1: hashes on one alignment needed to become a candidate.
+  CANDIDATE_HITS: 5,
+  MAX_CANDIDATES: 8,
+  // Hits on one alignment further apart than this are two uses of the track.
+  // (A track restarted later is a different alignment, so it is two rows
+  // anyway; this only splits a track that went silent for a long stretch.
+  // Shorter gaps are speech masking a quiet bed, not a new use.)
+  SPLIT_GAP_FRAMES: Math.round(30 * FRAMES_PER_SEC),
+  // Stage 2: peak coincidences in a VERIFY_WINDOW must reach VERIFY_MIN to
+  // mark where the track is audible; a segment needs SEGMENT_MIN_COINCIDENCES.
+  VERIFY_WINDOW: Math.round(2 * FRAMES_PER_SEC),
+  VERIFY_MIN: 4,
+  EDGE_NEAR: Math.round(1 * FRAMES_PER_SEC),
+  EDGE_FAR: Math.round(2 * FRAMES_PER_SEC),
+  OWNER_SMOOTH: 2, // seconds either side when deciding which alignment owns a second
+  SEGMENT_MIN_COINCIDENCES: 12,
+  // Off-alignment shifts (frames, not multiples of a common beat) for the
+  // chance level, and how far above it a match must be.
+  NULL_SHIFTS: Object.freeze([37, 61, 97, 131, 173, 211, -41, -67, -103, -139, -181, -223]),
+  NULL_RATIO: 7,
+  // How far past a candidate's first and last hash the true start/end may lie.
+  REFINE_REACH_FRAMES: Math.round(20 * FRAMES_PER_SEC),
+});
+
+// Defaults plus overrides; an unknown name throws (catches --set typos).
+export function tunables(options = {}) {
+  for (const k of Object.keys(options)) {
+    if (!(k in TUNABLES)) throw new Error(`unknown matcher option ${k} (DELTA_BIN, MIN_BIN_HITS, MAX_CLUSTERS are fixed by SQL)`);
+  }
+  return { ...TUNABLES, ...options };
+}
 
 // tracks: [{ tid, hashes, times }] -> Map(hash -> [tid, t, tid, t, ...])
 export function buildIndex(tracks) {
@@ -101,7 +114,7 @@ export function trackWindowInMemory(tracksByTid, tid, from, to) {
 // Stage 1: clusters -> candidate alignments [{ tid, delta, start, end, hits }]
 // (frames). Adjacent offset bins of one track are one alignment (frame jitter
 // splits a true match over two bins); each alignment splits at long gaps.
-export function candidatesFromClusters(clusters, { minHits = CANDIDATE_HITS, gap = SPLIT_GAP_FRAMES, max = MAX_CANDIDATES } = {}) {
+export function candidatesFromClusters(clusters, { minHits = TUNABLES.CANDIDATE_HITS, gap = TUNABLES.SPLIT_GAP_FRAMES, max = TUNABLES.MAX_CANDIDATES } = {}) {
   const byTrack = new Map();
   for (const c of clusters) {
     if (!byTrack.has(c.tid)) byTrack.set(c.tid, []);
@@ -193,22 +206,22 @@ function windowCounts(times, w, back = false) {
 // The same count at off-alignment shifts is the chance level for this pair
 // of recordings (tonal music in the same key and tempo lines up by chance far
 // more often than noise does), so a match must beat it by NULL_RATIO.
-function verifyCandidate(cand, queryPeaks, trackPeaks) {
-  const lo = Math.max(0, cand.start - REFINE_REACH_FRAMES);
-  const hi = cand.end + REFINE_REACH_FRAMES;
+function verifyCandidate(cand, queryPeaks, trackPeaks, o = TUNABLES) {
+  const lo = Math.max(0, cand.start - o.REFINE_REACH_FRAMES);
+  const hi = cand.end + o.REFINE_REACH_FRAMES;
   const times = coincidences(queryPeaks, trackPeaks, cand.delta, lo, hi);
-  const nulls = NULL_SHIFTS.map((s) => coincidences(queryPeaks, trackPeaks, cand.delta + s, lo, hi).length);
+  const nulls = o.NULL_SHIFTS.map((s) => coincidences(queryPeaks, trackPeaks, cand.delta + s, lo, hi).length);
   const chance = Math.max(1, nulls.reduce((a, b) => a + b, 0) / nulls.length);
   const ratio = times.length / chance;
-  if (ratio < NULL_RATIO) return null;
+  if (ratio < o.NULL_RATIO) return null;
 
   // Coincidences in a dense window (VERIFY_MIN within VERIFY_WINDOW) mark
   // where the track is audible; lone chance coincidences drop out.
-  const fwd = windowCounts(times, VERIFY_WINDOW);
+  const fwd = windowCounts(times, o.VERIFY_WINDOW);
   const dense = new Uint8Array(times.length);
   for (let i = 0; i < times.length; i++) {
-    if (fwd[i] >= VERIFY_MIN) {
-      for (let k = i; k < times.length && times[k] <= times[i] + VERIFY_WINDOW; k++) dense[k] = 1;
+    if (fwd[i] >= o.VERIFY_MIN) {
+      for (let k = i; k < times.length && times[k] <= times[i] + o.VERIFY_WINDOW; k++) dense[k] = 1;
     }
   }
   const kept = times.filter((_, i) => dense[i]);
@@ -216,13 +229,13 @@ function verifyCandidate(cand, queryPeaks, trackPeaks) {
   let best = null;
   let from = 0;
   for (let i = 1; i <= kept.length; i++) {
-    if (i === kept.length || kept[i] - kept[i - 1] > SPLIT_GAP_FRAMES) {
+    if (i === kept.length || kept[i] - kept[i - 1] > o.SPLIT_GAP_FRAMES) {
       const run = kept.slice(from, i);
       if (run[run.length - 1] >= cand.start && run[0] <= cand.end && (!best || run.length > best.length)) best = run;
       from = i;
     }
   }
-  if (!best || best.length < SEGMENT_MIN_COINCIDENCES) return null;
+  if (!best || best.length < o.SEGMENT_MIN_COINCIDENCES) return null;
   return { times: best, ratio: Math.round(ratio * 10) / 10 };
 }
 
@@ -231,10 +244,10 @@ function verifyCandidate(cand, queryPeaks, trackPeaks) {
 // count for 2 seconds (and at least 3), with another coincidence within 1 s.
 // A chance coincidence just outside the track can then only pass if the
 // track itself fills most of its window, so it moves the edge by under ~1 s.
-function edges(times) {
+function edges(times, o = TUNABLES) {
   const edge = (back) => {
-    const near = windowCounts(times, EDGE_NEAR, back);
-    const far = windowCounts(times, EDGE_FAR, back);
+    const near = windowCounts(times, o.EDGE_NEAR, back);
+    const far = windowCounts(times, o.EDGE_FAR, back);
     const typical = [...far].sort((a, b) => a - b)[far.length >> 1];
     const need = Math.max(3, Math.ceil(typical / 2));
     for (let k = 0; k < times.length; k++) {
@@ -254,7 +267,7 @@ function edges(times) {
 // around it (OWNER_SMOOTH either side; ties to the stronger alignment
 // overall), and each alignment keeps only its own seconds. What's left is cut
 // at long gaps into rows; scraps below SEGMENT_MIN_COINCIDENCES drop.
-export function finalSegments(verified) {
+export function finalSegments(verified, o = TUNABLES) {
   const strength = (v) => v.times.length;
   const owner = new Map(); // second -> alignment
   const local = verified.map((v) => {
@@ -271,7 +284,7 @@ export function finalSegments(verified) {
     let bestScore = -1;
     verified.forEach((v, i) => {
       let score = 0;
-      for (let d = -OWNER_SMOOTH; d <= OWNER_SMOOTH; d++) score += local[i].get(sec + d) || 0;
+      for (let d = -o.OWNER_SMOOTH; d <= o.OWNER_SMOOTH; d++) score += local[i].get(sec + d) || 0;
       if (!local[i].has(sec)) return;
       if (score > bestScore || (score === bestScore && strength(v) > strength(verified[best]))) {
         best = i;
@@ -285,9 +298,9 @@ export function finalSegments(verified) {
     const own = v.times.filter((t) => owner.get(Math.floor(t / FRAMES_PER_SEC)) === i);
     let from = 0;
     for (let k = 1; k <= own.length; k++) {
-      if (k === own.length || own[k] - own[k - 1] > SPLIT_GAP_FRAMES) {
+      if (k === own.length || own[k] - own[k - 1] > o.SPLIT_GAP_FRAMES) {
         const run = own.slice(from, k);
-        if (run.length >= SEGMENT_MIN_COINCIDENCES) rows.push({ tid: v.tid, delta: v.delta, ...edges(run), coincidences: run.length });
+        if (run.length >= o.SEGMENT_MIN_COINCIDENCES) rows.push({ tid: v.tid, delta: v.delta, ...edges(run, o), coincidences: run.length });
         from = k;
       }
     }
@@ -299,17 +312,18 @@ export function finalSegments(verified) {
 // and the tests in-memory ones):
 //   lookup(hashes, times) -> clusters
 //   trackWindow(tid, from, to) -> { hashes, times } of that track
-export async function match(query, { lookup, trackWindow }) {
+export async function match(query, { lookup, trackWindow }, options = {}) {
+  const o = tunables(options);
   const clusters = await lookup(query.hashes, query.times);
-  const candidates = candidatesFromClusters(clusters);
+  const candidates = candidatesFromClusters(clusters, { minHits: o.CANDIDATE_HITS, gap: o.SPLIT_GAP_FRAMES, max: o.MAX_CANDIDATES });
   if (!candidates.length) return [];
   const queryPeaks = peaksFromHashes(query.hashes, query.times);
   const verified = await Promise.all(candidates.map(async (c) => {
-    const ref = await trackWindow(c.tid, c.start - c.delta - REFINE_REACH_FRAMES - 64, c.end - c.delta + REFINE_REACH_FRAMES + 64);
-    const v = verifyCandidate(c, queryPeaks, peaksFromHashes(ref.hashes, ref.times));
+    const ref = await trackWindow(c.tid, c.start - c.delta - o.REFINE_REACH_FRAMES - 64, c.end - c.delta + o.REFINE_REACH_FRAMES + 64);
+    const v = verifyCandidate(c, queryPeaks, peaksFromHashes(ref.hashes, ref.times), o);
     return v && { tid: c.tid, delta: c.delta, ...v };
   }));
-  return finalSegments(verified.filter(Boolean));
+  return finalSegments(verified.filter(Boolean), o);
 }
 
 export const framesToSec = (f) => Math.round((f / FRAMES_PER_SEC) * 100) / 100;

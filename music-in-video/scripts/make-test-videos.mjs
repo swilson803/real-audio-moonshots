@@ -3,14 +3,20 @@
 // videos contain catalog audio, so they stay in test-videos/ (gitignored)
 // and are regenerated from the seed, never committed.
 //
-//   node --env-file=.env scripts/make-test-videos.mjs --speech-dir DIR [options]
+//   node scripts/make-test-videos.mjs --catalog-dir DIR --speech-dir DIR [options]
 //
+//   --catalog-dir DIR     DIR/catalog.json ([{ track_id, title, artist, file,
+//                         stream_url, duration_s }], file relative to DIR):
+//                         the audio cache build-catalog-index.mjs --cache-dir
+//                         writes. With it, nothing touches production.
+//   --allow-prod-download without --catalog-dir, download the chosen tracks
+//                         from production instead (anon REST + audio; needs
+//                         PROD_SUPABASE_ANON_KEY). Refused unless given, so
+//                         egress is never spent by accident. Not for phase 2.
 //   --speech-dir DIR      voice-over clips (.flac / .wav, read recursively);
 //                         LibriSpeech test-clean (CC BY 4.0) for the real run
-//   --catalog-dir DIR     use DIR/catalog.json ([{ track_id, title, artist, file }])
-//                         instead of reading production (anon GET of the
-//                         chosen tracks' public audio only; needs
-//                         PROD_SUPABASE_ANON_KEY)
+//   --only LIST           comma list of two_tracks,no_music,quiet,dev
+//                         (default: all of them)
 //   --two-tracks ID,ID    the two catalog tracks for the two-track video
 //                         (default: picked from the seed)
 //   --seed N              acceptance seed (default 6006); dev videos use N+1
@@ -122,6 +128,8 @@ async function video(voiceWav, musicWavs, seconds, out, variant = 'mp4') {
 const fileOf = async (t) => t.file ?? (t.file = await t.fetchFile());
 
 const expectOf = (t, at) => ({ track_id: t.track_id, title: t.title, artist: t.artist, start_s: at });
+// Tracks long enough for the excerpt each video needs (duration unknown: kept).
+const longEnough = (list, seconds) => list.filter((t) => !(t.duration_s < seconds));
 const pickDistinct = (list, n, r) => {
   const pool = [...list];
   const out = [];
@@ -155,7 +163,7 @@ export async function makeVideos({ catalog, speechFiles, outDir, seed = 6006, tw
 
   if (want('two_tracks')) {
     const r = rng(seed);
-    const [a, b] = twoTracks ? twoTracks.map((id) => catalog.find((t) => t.track_id === id)) : pickDistinct(catalog, 2, r);
+    const [a, b] = twoTracks ? twoTracks.map((id) => catalog.find((t) => t.track_id === id)) : pickDistinct(longEnough(catalog, 95), 2, r);
     if (!a || !b) throw new Error('--two-tracks: track not in the catalog');
     const v = await voice(speechFiles, 75, r, tmp, 'two.voice');
     const ma = await music(await fileOf(a), 30, 32, 4, -12, tmp, 'two.a');
@@ -181,7 +189,8 @@ export async function makeVideos({ catalog, speechFiles, outDir, seed = 6006, tw
   for (const [prefix, s] of [['RA_TEST_quiet', seed], ['RA_TEST_dev_quiet', seed + 1]]) {
     if (!want(prefix.includes('dev') ? 'dev' : 'quiet')) continue;
     const r = rng(s + 300);
-    const tracks = pickDistinct(catalog, 10, r);
+    const tracks = pickDistinct(longEnough(catalog, 50), 10, r);
+    if (tracks.length < 10) throw new Error(`need 10 catalog tracks of 50 s or more for ${prefix}, have ${tracks.length}`);
     for (let i = 0; i < 10; i++) {
       const name = `${prefix}_${String(i + 1).padStart(2, '0')}`;
       manifest.push(await quietVideo({ track: tracks[i], speechFiles, r, levelDb: -20, name, variant: VARIANTS[i + 1] || 'mp4', tmp, outDir }));
@@ -192,7 +201,7 @@ export async function makeVideos({ catalog, speechFiles, outDir, seed = 6006, tw
   if (sweep) {
     const r = rng(seed + 400);
     for (const level of [-12, -16, -20, -24, -28]) {
-      for (const [i, track] of pickDistinct(catalog, 5, r).entries()) {
+      for (const [i, track] of pickDistinct(longEnough(catalog, 50), 5, r).entries()) {
         const name = `RA_TEST_sweep_${-level}db_${i + 1}`;
         manifest.push(await quietVideo({ track, speechFiles, r, levelDb: level, name, variant: 'mp4', tmp, outDir }));
       }
@@ -201,7 +210,13 @@ export async function makeVideos({ catalog, speechFiles, outDir, seed = 6006, tw
   }
 
   await rm(tmp, { recursive: true, force: true });
-  await writeFile(join(outDir, 'manifest.json'), JSON.stringify({ seed, made: new Date().toISOString(), videos: manifest }, null, 2));
+  // Merge with an earlier manifest in outDir (an --only run replaces just its
+  // own videos), keeping the order: earlier videos first, then new ones.
+  let earlier = [];
+  try { earlier = JSON.parse(await readFile(join(outDir, 'manifest.json'), 'utf8')).videos ?? []; } catch { /* none yet */ }
+  const mine = new Set(manifest.map((v) => v.file));
+  const videos = [...earlier.filter((v) => !mine.has(v.file)), ...manifest];
+  await writeFile(join(outDir, 'manifest.json'), JSON.stringify({ seed, made: new Date().toISOString(), videos }, null, 2));
   return manifest;
 }
 
@@ -220,18 +235,31 @@ async function prodCatalog(dir) {
   }));
 }
 
+export const ONLY = ['two_tracks', 'no_music', 'quiet', 'dev'];
+
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
   const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
+  const catalogDir = opt('--catalog-dir');
+  if (!catalogDir && !args.includes('--allow-prod-download')) {
+    console.error('Refusing to run without --catalog-dir: it would download catalog audio from production. '
+      + 'Use the index build cache (--catalog-dir /workspace/ms006/audio-cache), or pass --allow-prod-download on purpose.');
+    process.exit(1);
+  }
+  const only = opt('--only')?.split(',').map((x) => x.trim()).filter(Boolean) ?? null;
+  const unknown = (only ?? []).filter((x) => !ONLY.includes(x));
+  if (unknown.length) {
+    console.error(`--only: unknown ${unknown.join(', ')} (use ${ONLY.join(',')})`);
+    process.exit(1);
+  }
   const outDir = opt('--out') || new URL('../test-videos/', import.meta.url).pathname;
   const speechDir = opt('--speech-dir');
   if (!speechDir) throw new Error('--speech-dir is required');
   const speechFiles = await listAudio(speechDir);
   let catalog;
-  if (opt('--catalog-dir')) {
-    const dir = opt('--catalog-dir');
-    const list = JSON.parse(await readFile(join(dir, 'catalog.json'), 'utf8'));
-    catalog = list.map((t) => ({ ...t, file: join(dir, t.file) }));
+  if (catalogDir) {
+    const list = JSON.parse(await readFile(join(catalogDir, 'catalog.json'), 'utf8'));
+    catalog = list.map((t) => ({ ...t, file: join(catalogDir, t.file) }));
   } else {
     catalog = await prodCatalog(join(outDir, '.catalog'));
   }
@@ -242,5 +270,6 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     seed: Number(opt('--seed') || 6006),
     twoTracks: opt('--two-tracks')?.split(','),
     sweep: args.includes('--sweep'),
+    only,
   });
 }

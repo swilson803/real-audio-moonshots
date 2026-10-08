@@ -51,6 +51,24 @@ export function prodReader(anonKey, fetchImpl = fetch) {
   };
 }
 
+// Keyless reader for production catalog AUDIO only: GET or HEAD of a public
+// object under PROD_TRACKS_PREFIX, no key or auth header of any kind. The
+// URL is normalised first, so ../ tricks can't climb out of the bucket. Used
+// for audio whenever the track list comes from a file (no REST at all).
+export function prodAudioReader(fetchImpl = fetch) {
+  return async (url, { method = 'GET', signal } = {}) => {
+    if (method !== 'GET' && method !== 'HEAD') throw new Error(`Refusing ${method} to production: read only`);
+    let href;
+    try {
+      href = new URL(url).href;
+    } catch {
+      throw new Error(`Refusing production URL ${url}: not a URL`);
+    }
+    if (!href.startsWith(PROD_TRACKS_PREFIX)) throw new Error(`Refusing production URL ${url}: not under the public Tracks bucket`);
+    return fetchImpl(href, { method, signal });
+  };
+}
+
 // Active, non-SFX catalog tracks with their artist, paged like
 // real-audio-creator scripts/catalog.mjs.
 export async function fetchActiveTracks(read) {
@@ -77,7 +95,9 @@ export async function fetchActiveTracks(read) {
 }
 
 // Moonshots REST with the service key; refuses production.
-export function moonshotsWriter(url, serviceKey, fetchImpl = fetch) {
+// retries: extra attempts after a network error, 5xx or 429, with
+// exponential backoff (sleep is injectable for tests).
+export function moonshotsWriter(url, serviceKey, fetchImpl = fetch, { retries = 3, backoffMs = 1000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   if (!url || !serviceKey) throw new Error('MOONSHOTS_SUPABASE_URL and MOONSHOTS_SERVICE_ROLE_KEY must be set');
   if (url.includes(PROD_REF)) throw new Error('Refusing to write to Real Audio production');
   if (!url.includes(MOONSHOTS_REF)) throw new Error(`MOONSHOTS_SUPABASE_URL must be the moonshots project (${MOONSHOTS_REF})`);
@@ -88,12 +108,23 @@ export function moonshotsWriter(url, serviceKey, fetchImpl = fetch) {
     ? { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` }
     : { apikey: serviceKey };
   return async (path, { method = 'GET', body, prefer } = {}) => {
-    const res = await fetchImpl(`${base}/rest/v1/${path}`, {
-      method,
-      headers: { ...headers, 'Content-Type': 'application/json', ...(prefer ? { Prefer: prefer } : {}) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`moonshots ${method} ${path.split('?')[0]} ${res.status}: ${await res.text()}`);
-    return res.status === 204 || res.status === 201 ? null : res.json();
+    const label = `moonshots ${method} ${path.split('?')[0]}`;
+    for (let attempt = 0; ; attempt++) {
+      let res;
+      try {
+        res = await fetchImpl(`${base}/rest/v1/${path}`, {
+          method,
+          headers: { ...headers, 'Content-Type': 'application/json', ...(prefer ? { Prefer: prefer } : {}) },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      } catch (err) {
+        if (attempt < retries) { await sleep(backoffMs * 2 ** attempt); continue; }
+        throw new Error(`${label}: ${err.message}`);
+      }
+      if (res.ok) return res.status === 204 || res.status === 201 ? null : res.json();
+      const text = await res.text();
+      if ((res.status >= 500 || res.status === 429) && attempt < retries) { await sleep(backoffMs * 2 ** attempt); continue; }
+      throw new Error(`${label} ${res.status}: ${text}`);
+    }
   };
 }
