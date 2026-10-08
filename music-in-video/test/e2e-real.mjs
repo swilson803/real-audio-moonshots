@@ -25,6 +25,7 @@ import { join, parse } from 'node:path';
 import { serveWorker } from './serve.mjs';
 import { runBrowserSuite } from './browser-suite.mjs';
 import { prodAudioReader } from '../scripts/lib/targets.mjs';
+import { withKinds } from '../scripts/lib/kinds.mjs';
 
 const MOONSHOTS_HOST = 'kucwpmtkctafzkivuqtu.supabase.co';
 const need = (k) => {
@@ -63,7 +64,7 @@ globalThis.fetch = (input, init = {}) => {
 };
 
 const manifest = JSON.parse(await readFile(join(VIDEOS, 'manifest.json'), 'utf8'));
-const videos = manifest.videos.filter((v) => SELECT.includes(v.kind));
+const videos = withKinds(manifest.videos).filter((v) => SELECT.includes(v.kind));
 const catalog = JSON.parse(await readFile(join(CATALOG, 'catalog.json'), 'utf8')).map((t) => ({ ...t, file: join(CATALOG, t.file) }));
 const labelFor = (file) => `RA_TEST_ms006_${parse(file).name.replace(/^RA_TEST_/, '')}`;
 console.log(`${videos.length} videos (${SELECT.join(', ')}); catalog cache ${catalog.length} tracks`);

@@ -1,16 +1,26 @@
-// Round-B tuning loop, Node only: each manifest video is decoded with ffmpeg
-// (16 kHz mono), fingerprinted with public/music/fp.js and matched with
-// src/match.js against the REAL moonshots index, then compared with the
-// manifest. The DB answers are cached in OUT/cache/, so threshold sweeps
+// Tuning loop, Node only: each manifest video is decoded with ffmpeg (16 kHz
+// mono), fingerprinted exactly as the browser does (public/music/fp.js
+// QUERY: hashes + verification peaks) and matched with src/match.js, with
+// lookups sliced as in the Worker, against the REAL moonshots index or an
+// offline replica of it (--replica, scripts/replica.mjs), then compared with
+// the manifest. Real DB answers are cached in OUT/cache/, so threshold sweeps
 // (--set) re-run without touching the DB.
 //
 //   SUPABASE_URL=… SUPABASE_SECRET_KEY=… node scripts/tune.mjs \
 //     --manifest /workspace/ms006/videos/manifest.json --kind dev \
 //     --out /workspace/ms006/tune [--name REGEX] [--set NAME=VALUE …] [--offline]
 //
+//   node scripts/tune.mjs --replica /workspace/ms006/replica \
+//     --catalog-dir /workspace/ms006/audio-cache --manifest … [--manifest …] --kind dev,no_music
+//
 //   SUPABASE_URL / SUPABASE_SECRET_KEY   moonshots only (src/scan.js refuses
 //                                        production); not needed with --offline
-//   --manifest PATH   make-test-videos manifest; videos are next to it
+//                                        or --replica
+//   --manifest PATH   make-test-videos / make-negatives manifest; videos are
+//                     next to it (repeatable)
+//   --replica DIR     match against the offline replica (no network; needs
+//                     --catalog-dir); leave-one-out negatives
+//                     (exclude_track_ids) only work here
 //   --kind LIST       comma list of kinds (default dev; two_tracks,no_music,quiet,dev,sweep)
 //   --name REGEX      only files matching
 //   --set NAME=VALUE  matcher override (see TUNABLES in src/match.js; repeatable;
@@ -25,11 +35,13 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FP_VERSION, fingerprint } from '../public/music/fp.js';
+import { FP_VERSION, QUERY, fingerprint } from '../public/music/fp.js';
 import { TUNABLES, framesToSec, match, tunables } from '../src/match.js';
 import { moonshots } from '../src/scan.js';
 import { decodeToPcm } from './build-catalog-index.mjs';
 import { judge } from '../test/browser-suite.mjs';
+import { withKinds } from './lib/kinds.mjs';
+import { loadReplica } from './replica.mjs';
 
 // --set NAME=VALUE pairs -> match() options.
 export function parseSets(sets) {
@@ -93,41 +105,69 @@ function cachedDb({ db, cacheDir, offline = false }) {
   };
 }
 
+const QUERY_KEY = JSON.stringify(QUERY);
+
+// The video's query fingerprint, cached (keyed by FP_VERSION, the QUERY
+// preset and the file's size + mtime).
 async function videoFingerprint(path, cacheDir, offline) {
   const st = await stat(path);
   const file = join(cacheDir, `${basename(path)}.fp.json`);
+  let data = null;
   try {
     const hit = JSON.parse(await readFile(file, 'utf8'));
-    if (hit.fp_version === FP_VERSION && hit.size === st.size && hit.mtime === st.mtimeMs) return hit;
+    if (hit.fp_version === FP_VERSION && hit.query === QUERY_KEY && hit.size === st.size && hit.mtime === st.mtimeMs) data = hit;
   } catch { /* not cached */ }
-  if (offline) throw new Error(`offline: ${basename(file)} not cached`);
-  const fp = fingerprint(await decodeToPcm(path));
-  const data = { fp_version: FP_VERSION, size: st.size, mtime: st.mtimeMs, hashes: Array.from(fp.hashes), times: Array.from(fp.times) };
-  await writeFile(file, JSON.stringify(data));
-  return data;
+  if (!data) {
+    if (offline) throw new Error(`offline: ${basename(file)} not cached`);
+    const fp = fingerprint(await decodeToPcm(path), QUERY);
+    data = {
+      fp_version: FP_VERSION, query: QUERY_KEY, size: st.size, mtime: st.mtimeMs,
+      hashes: Array.from(fp.hashes), times: Array.from(fp.times), peakT: Array.from(fp.peakT), peakF: Array.from(fp.peakF),
+    };
+    await writeFile(file, JSON.stringify(data));
+  }
+  return {
+    hashes: Int32Array.from(data.hashes),
+    times: Int32Array.from(data.times),
+    peaks: { t: Int32Array.from(data.peakT), f: Int32Array.from(data.peakF) },
+  };
 }
 
-export async function tune({ manifestPath, kinds, nameRe, sets, outDir, db, offline, log = console.log }) {
-  const cacheDir = join(outDir, 'cache');
-  await mkdir(cacheDir, { recursive: true });
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  const videosDir = dirname(manifestPath);
-  const videos = manifest.videos.filter((v) => kinds.includes(v.kind) && (!nameRe || nameRe.test(v.file)));
-  const cache = cachedDb({ db, cacheDir, offline });
+export async function tune({ manifestPaths, kinds, nameRe, sets, outDir, db, offline, direct = false, allowAcceptance = false, log = console.log }) {
+  if (kinds.includes('quiet') && !allowAcceptance) throw new Error('kind quiet is the acceptance set: never tune on it (--allow-acceptance to run it on purpose)');
+  const videos = [];
+  for (const manifestPath of manifestPaths) {
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const dir = dirname(manifestPath);
+    for (const v of withKinds(manifest.videos)) {
+      if (kinds.includes(v.kind) && (!nameRe || nameRe.test(v.file))) videos.push({ ...v, dir, set: basename(dir) });
+    }
+  }
   const rows = [];
   for (const v of videos) {
-    const q = await videoFingerprint(join(videosDir, v.file), cacheDir, offline);
-    const segs = await match(q, cache.forVideo(v.file), sets);
+    // One cache folder per video folder (file names repeat across sets).
+    const cacheDir = join(outDir, 'cache', v.set);
+    await mkdir(cacheDir, { recursive: true });
+    if (v.exclude_track_ids && !direct) {
+      log(`SKIP  ${v.file}: leave-one-out negative, replica only`);
+      continue;
+    }
+    // direct: a local db (the replica) needs no answer cache.
+    const deps = direct
+      ? { lookup: db.lookupWithout(v.exclude_track_ids), trackWindow: db.trackWindow }
+      : cachedDb({ db, cacheDir, offline }).forVideo(v.file);
+    const q = await videoFingerprint(join(v.dir, v.file), cacheDir, offline);
+    const segs = await match(q, deps, sets);
     const tids = [...new Set(segs.map((s) => s.tid))];
     // Map tids to track_ids via the cached catalog lookup (one row set per video).
     const catFile = join(cacheDir, `${v.file}.catalog.json`);
     let catalog = [];
     if (tids.length) {
-      try { catalog = JSON.parse(await readFile(catFile, 'utf8')); } catch { /* not cached */ }
+      if (!direct) try { catalog = JSON.parse(await readFile(catFile, 'utf8')); } catch { /* not cached */ }
       if (tids.some((t) => !catalog.find((c) => c.tid === t))) {
         if (offline) throw new Error(`offline: ${basename(catFile)} not cached`);
         catalog = await db.catalog(tids);
-        await writeFile(catFile, JSON.stringify(catalog));
+        if (!direct) await writeFile(catFile, JSON.stringify(catalog));
       }
     }
     const matches = segs.map((s) => {
@@ -135,15 +175,16 @@ export async function tune({ manifestPath, kinds, nameRe, sets, outDir, db, offl
       return { track_id: c.track_id, title: c.title, start_s: framesToSec(s.start), end_s: framesToSec(s.end), coincidences: s.coincidences };
     });
     const pass = judge(v, matches.length > 0, matches);
-    rows.push({ file: v.file, kind: v.kind, pass, got: matches, want: v.expect.map((e) => ({ track_id: e.track_id, title: e.title, start_s: e.start_s })) });
+    rows.push({ set: v.set, file: v.file, kind: v.kind, pass, got: matches, want: v.expect.map((e) => ({ track_id: e.track_id, title: e.title, start_s: e.start_s })) });
     const fmt = (xs) => xs.map((x) => `${x.title}@${x.start_s}`).join(', ') || '—';
-    log(`${(pass ? 'PASS' : 'FAIL').padEnd(5)} ${v.file.padEnd(34)} ${fmt(matches)}  want ${fmt(v.expect)}`);
+    log(`${(pass ? 'PASS' : 'FAIL').padEnd(5)} ${`${v.set}/${v.file}`.padEnd(46)} ${fmt(matches)}  want ${fmt(v.expect)}`);
   }
   const byKind = {};
   for (const r of rows) {
-    byKind[r.kind] ??= { pass: 0, total: 0 };
-    byKind[r.kind].total++;
-    if (r.pass) byKind[r.kind].pass++;
+    const k = `${r.set}:${r.kind}`;
+    byKind[k] ??= { pass: 0, total: 0 };
+    byKind[k].total++;
+    if (r.pass) byKind[k].pass++;
   }
   log(`summary ${JSON.stringify(byKind)}  overrides ${JSON.stringify(sets)}`);
   const result = { ran_at: new Date().toISOString(), fp_version: FP_VERSION, overrides: sets, summary: byKind, videos: rows };
@@ -156,17 +197,26 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
   const all = (k) => args.flatMap((a, i) => (a === k ? [args[i + 1]] : []));
   const offline = args.includes('--offline');
-  const manifestPath = opt('--manifest');
-  if (!manifestPath) throw new Error('--manifest is required');
-  const db = offline ? null : moonshots({ SUPABASE_URL: process.env.SUPABASE_URL, SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY });
-  if (!offline && !process.env.SUPABASE_SECRET_KEY) throw new Error('SUPABASE_SECRET_KEY is not set (or use --offline)');
+  const manifestPaths = all('--manifest');
+  if (!manifestPaths.length) throw new Error('--manifest is required');
+  const replica = opt('--replica');
+  let db = null;
+  if (replica) {
+    if (!opt('--catalog-dir')) throw new Error('--replica needs --catalog-dir (the audio cache with catalog.json)');
+    ({ db } = await loadReplica({ cacheDir: opt('--catalog-dir'), out: replica }));
+  } else if (!offline) {
+    if (!process.env.SUPABASE_SECRET_KEY) throw new Error('SUPABASE_SECRET_KEY is not set (or use --offline / --replica)');
+    db = moonshots({ SUPABASE_URL: process.env.SUPABASE_URL, SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY });
+  }
   await tune({
-    manifestPath,
+    manifestPaths,
     kinds: (opt('--kind') || 'dev').split(','),
     nameRe: opt('--name') ? new RegExp(opt('--name')) : null,
     sets: parseSets(all('--set')),
     outDir: opt('--out') || 'tune-out',
     db,
     offline,
+    direct: Boolean(replica),
+    allowAcceptance: args.includes('--allow-acceptance'),
   });
 }

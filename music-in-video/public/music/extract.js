@@ -10,7 +10,7 @@
 // decodeAudioData, under a size cap.
 
 import { createFile, MP4BoxBuffer } from './vendor/mp4box/mp4box.all.mjs';
-import { Fingerprinter, Resampler, SAMPLE_RATE } from './fp.js';
+import { Fingerprinter, QUERY, Resampler, SAMPLE_RATE } from './fp.js';
 
 const MAX_SECONDS = 20 * 60;
 const SLICE = 4 * 1024 * 1024;
@@ -27,7 +27,7 @@ export class ExtractError extends Error {
 
 const isMp4 = (file) => /\.(mp4|mov|m4v)$/i.test(file.name) || /^video\/(mp4|quicktime|x-m4v)$/.test(file.type);
 
-// -> { hashes, times, durationMs }
+// -> fp.js QUERY fingerprint (peaks, hash-peak flags, hashes) + durationMs
 export async function fingerprintVideo(file, onProgress = () => {}) {
   if (isMp4(file) && typeof AudioDecoder !== 'undefined') {
     const viaMp4 = await viaWebCodecs(file, onProgress);
@@ -44,8 +44,7 @@ function mono(planes) {
 }
 
 function finish(fp, durationMs) {
-  const { hashes, times } = fp.finish();
-  return { hashes, times, durationMs: Math.round(durationMs) };
+  return { ...fp.finish(), durationMs: Math.round(durationMs) };
 }
 
 // Top-level boxes [{ type, start, size }] from their headers alone.
@@ -109,7 +108,7 @@ async function viaWebCodecs(file, onProgress) {
   };
   if (!(await AudioDecoder.isConfigSupported(config)).supported) return null;
 
-  const fp = new Fingerprinter();
+  const fp = new Fingerprinter(QUERY);
   let resampler = null;
   let decodeError = null;
   decoder = new AudioDecoder({
@@ -171,7 +170,7 @@ async function viaDecodeAudioData(file, onProgress) {
   const planes = [];
   for (let c = 0; c < audio.numberOfChannels; c++) planes.push(audio.getChannelData(c));
   const samples = mono(planes);
-  const fp = new Fingerprinter();
+  const fp = new Fingerprinter(QUERY);
   const step = SAMPLE_RATE * 30;
   for (let i = 0; i < samples.length; i += step) {
     fp.push(samples.subarray(i, i + step));

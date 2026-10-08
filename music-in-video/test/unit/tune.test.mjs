@@ -4,33 +4,42 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fingerprint, FRAMES_PER_SEC } from '../../public/music/fp.js';
+import { fingerprint, FRAMES_PER_SEC, QUERY } from '../../public/music/fp.js';
 import { TUNABLES, match, tunables } from '../../src/match.js';
 import { parseSets, tune } from '../../scripts/tune.mjs';
+import { kindOf } from '../../scripts/lib/kinds.mjs';
 import { syntheticCatalog } from '../fixtures.mjs';
 import { place, slice, synthSpeech, wavBytes } from '../synth.mjs';
 
 const cat = syntheticCatalog(8, 60);
+const queryOf = (audio) => {
+  const fp = fingerprint(audio, QUERY);
+  return { hashes: fp.hashes, times: fp.times, peaks: { t: fp.peakT, f: fp.peakF } };
+};
 
-test('match() defaults are unchanged and an empty options object changes nothing', async () => {
+test('match() defaults are the round-B values and an empty options object changes nothing', async () => {
   assert.deepEqual({ ...TUNABLES, NULL_SHIFTS: [...TUNABLES.NULL_SHIFTS] }, {
-    CANDIDATE_HITS: 5,
-    MAX_CANDIDATES: 8,
+    CANDIDATE_HITS: 3,
+    MAX_CANDIDATES: 16,
     SPLIT_GAP_FRAMES: Math.round(30 * FRAMES_PER_SEC),
-    VERIFY_WINDOW: Math.round(2 * FRAMES_PER_SEC),
-    VERIFY_MIN: 4,
-    EDGE_NEAR: Math.round(1 * FRAMES_PER_SEC),
-    EDGE_FAR: Math.round(2 * FRAMES_PER_SEC),
+    BIN_FRAMES: 16,
+    LOCAL_WINDOW_BINS: 16,
+    LOCAL_MIN: 4,
+    LOCAL_Z: 3,
     OWNER_SMOOTH: 2,
-    SEGMENT_MIN_COINCIDENCES: 12,
-    NULL_SHIFTS: [37, 61, 97, 131, 173, 211, -41, -67, -103, -139, -181, -223],
-    NULL_RATIO: 7,
+    SEGMENT_MIN_COINCIDENCES: 30,
+    ROW_Z: 5,
+    NULL_SHIFTS: [31, 47, 67, 89, 113, 139, 167, 197, 229, 251, 277, 307,
+      -37, -53, -73, -97, -127, -149, -181, -211, -239, -263, -289, -313],
+    Z_MIN: 6,
+    NULL_RATIO: 2,
+    MERGE_GAP_FRAMES: Math.round(2 * FRAMES_PER_SEC),
     REFINE_REACH_FRAMES: Math.round(20 * FRAMES_PER_SEC),
   });
   for (const k of [0, 1, 2]) {
     const bed = synthSpeech(80 + k, 50);
     if (k) place(bed, slice(cat.tracks[k].audio, 5, 40), 3, -12);
-    const q = fingerprint(bed);
+    const q = queryOf(bed);
     const plain = await match(q, cat.deps);
     assert.deepEqual(await match(q, cat.deps, {}), plain);
     if (k) assert.equal(plain.length, 1);
@@ -38,7 +47,7 @@ test('match() defaults are unchanged and an empty options object changes nothing
 });
 
 test('match() options override, and unknown or SQL-fixed names throw', async () => {
-  const q = fingerprint(place(synthSpeech(90, 50), slice(cat.tracks[3].audio, 5, 40), 3, -12));
+  const q = queryOf(place(synthSpeech(90, 50), slice(cat.tracks[3].audio, 5, 40), 3, -12));
   assert.equal((await match(q, cat.deps)).length, 1);
   assert.equal((await match(q, cat.deps, { SEGMENT_MIN_COINCIDENCES: 1e9 })).length, 0);
   for (const bad of ['DELTA_BIN', 'MIN_BIN_HITS', 'MAX_CLUSTERS', 'NOPE']) assert.throws(() => tunables({ [bad]: 1 }), /unknown matcher option/);
@@ -52,8 +61,8 @@ test('tune: matches a manifest against the DB once, then re-runs from its cache 
   const vids = join(dir, 'videos');
   await mkdir(vids);
   const id = (tid) => `00000000-0000-4000-8000-00000000000${tid}`;
-  await writeFile(join(vids, 'RA_TEST_dev_quiet_01.wav'), wavBytes(place(synthSpeech(91, 50), slice(cat.tracks[2].audio, 5, 40), 6, -12)));
-  await writeFile(join(vids, 'RA_TEST_no_music_speech.wav'), wavBytes(synthSpeech(92, 40)));
+  await writeFile(join(vids, 'RA_TEST_dev_quiet_01.wav'), wavBytes(place(synthSpeech(92, 50), slice(cat.tracks[2].audio, 5, 40), 6, -12)));
+  await writeFile(join(vids, 'RA_TEST_no_music_speech.wav'), wavBytes(synthSpeech(93, 40)));
   await writeFile(join(vids, 'manifest.json'), JSON.stringify({ videos: [
     { file: 'RA_TEST_dev_quiet_01.wav', kind: 'dev', expect: [{ track_id: id(3), title: 'T3', start_s: 6 }] },
     { file: 'RA_TEST_no_music_speech.wav', kind: 'no_music', expect: [] },
@@ -67,13 +76,22 @@ test('tune: matches a manifest against the DB once, then re-runs from its cache 
   };
   const out = join(dir, 'out');
   const log = () => {};
-  const first = await tune({ manifestPath: join(vids, 'manifest.json'), kinds: ['dev', 'no_music'], sets: {}, outDir: out, db, offline: false, log });
-  assert.deepEqual(first.summary, { dev: { pass: 1, total: 1 }, no_music: { pass: 1, total: 1 } });
+  const first = await tune({ manifestPaths: [join(vids, 'manifest.json')], kinds: ['dev', 'no_music'], sets: {}, outDir: out, db, offline: false, log });
+  assert.deepEqual(first.summary, { 'videos:dev': { pass: 1, total: 1 }, 'videos:no_music': { pass: 1, total: 1 } });
   assert.deepEqual([calls.lookup, calls.catalog], [2, 1]);
   assert.ok(fetched.length > 0 && new Set(fetched).size === fetched.length, `each track fetched once, whole: ${fetched}`);
-  const again = await tune({ manifestPath: join(vids, 'manifest.json'), kinds: ['dev', 'no_music'], sets: { NULL_RATIO: 7 }, outDir: out, db: null, offline: true, log });
+  const again = await tune({ manifestPaths: [join(vids, 'manifest.json')], kinds: ['dev', 'no_music'], sets: { NULL_RATIO: 7 }, outDir: out, db: null, offline: true, log });
   assert.deepEqual(again.videos.map((v) => v.got), first.videos.map((v) => v.got));
-  const strict = await tune({ manifestPath: join(vids, 'manifest.json'), kinds: ['dev'], sets: { SEGMENT_MIN_COINCIDENCES: 1e9 }, outDir: out, db: null, offline: true, log });
-  assert.deepEqual(strict.summary, { dev: { pass: 0, total: 1 } });
-  assert.ok((await readdir(join(out, 'cache'))).some((f) => f.endsWith('.fp.json')));
+  const strict = await tune({ manifestPaths: [join(vids, 'manifest.json')], kinds: ['dev'], sets: { SEGMENT_MIN_COINCIDENCES: 1e9 }, outDir: out, db: null, offline: true, log });
+  assert.deepEqual(strict.summary, { 'videos:dev': { pass: 0, total: 1 } });
+  assert.ok((await readdir(join(out, 'cache', 'videos'))).some((f) => f.endsWith('.fp.json')));
+  await assert.rejects(tune({ manifestPaths: [join(vids, 'manifest.json')], kinds: ['quiet'], sets: {}, outDir: out, db: null, offline: true, log }), /acceptance set/);
+});
+
+test('kinds come from the file name: acceptance quiet, dev, sweep', () => {
+  // The phase-2 manifest said "quiet" for all three.
+  assert.equal(kindOf({ file: 'RA_TEST_quiet_03.mov', kind: 'quiet' }), 'quiet');
+  assert.equal(kindOf({ file: 'RA_TEST_dev_quiet_03.mov', kind: 'quiet' }), 'dev');
+  assert.equal(kindOf({ file: 'RA_TEST_sweep_24db_2.mp4', kind: 'quiet' }), 'sweep');
+  assert.equal(kindOf({ file: 'RA_TEST_no_music_other.mp4', kind: 'no_music' }), 'no_music');
 });

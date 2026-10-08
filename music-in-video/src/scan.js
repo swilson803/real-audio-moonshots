@@ -6,14 +6,18 @@
 // readable by anon; nothing here ever talks to production.
 
 import { FP_VERSION, FRAMES_PER_SEC } from '../public/music/fp.js';
+import { decodeScanBody } from '../public/music/body.js';
 import { supabaseHeaders } from '../../clearance-check/public/lib.js';
-import { match, framesToSec } from './match.js';
+import { match, framesToSec, slicedLookup } from './match.js';
 
 const PRODUCTION_REF = 'uprfsmwbsvzuoiyfgtgx';
 const MOONSHOTS_REF = 'kucwpmtkctafzkivuqtu';
 const MAX_DURATION_MS = 20 * 60 * 1000 + 5000; // 20 minutes, plus slack for container rounding
-// About 40 hashes a second in practice (fp.js); allow three times that.
-const MAX_HASHES = Math.ceil((MAX_DURATION_MS / 1000) * 120);
+// The QUERY fingerprint (fp.js) sends ~120 verification peaks a second of
+// video (the Worker rebuilds ~200 hashes a second from them); allow about
+// twice that.
+const MAX_PEAKS = Math.ceil((MAX_DURATION_MS / 1000) * 300);
+const MAX_BODY_BYTES = 12 + MAX_PEAKS * 4 + Math.ceil(MAX_PEAKS / 32) * 4;
 const ID_RE = /^[0-9A-Za-z]{10}$/;
 const LABEL_RE = /^RA_TEST_[A-Za-z0-9._-]{1,80}$/;
 const ID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -38,20 +42,17 @@ function newScanId() {
 
 // Body: little-endian int32s [FP_VERSION, duration_ms, n, hash x n, time x n]
 // (public/music/app.js builds it).
-export function parseScanBody(buf) {
-  if (!buf.byteLength || buf.byteLength % 4) throw new BadRequest('bad body');
-  const v = new Int32Array(buf);
-  const [version, durationMs, n] = v;
-  if (version !== FP_VERSION) throw new BadRequest('fingerprint version mismatch: reload the page');
-  if (!(durationMs > 0 && durationMs <= MAX_DURATION_MS)) throw new BadRequest('video too long');
-  if (!(n >= 0 && n <= MAX_HASHES) || v.length !== 3 + 2 * n) throw new BadRequest('bad body');
-  const hashes = v.subarray(3, 3 + n);
-  const times = v.subarray(3 + n);
-  const maxFrame = Math.ceil((durationMs / 1000) * FRAMES_PER_SEC);
-  for (let i = 0; i < n; i++) {
-    if (hashes[i] < 0 || hashes[i] >= 1 << 24 || times[i] < 0 || times[i] > maxFrame) throw new BadRequest('bad body');
-  }
-  return { durationMs, hashes, times };
+function parseScanBody(buf) {
+  const q = decodeScanBody(buf);
+  if (!q) throw new BadRequest('bad body');
+  if (q.version !== FP_VERSION) throw new BadRequest('fingerprint version mismatch: reload the page');
+  if (!(q.durationMs > 0 && q.durationMs <= MAX_DURATION_MS)) throw new BadRequest('video too long');
+  if (q.peaks.t.length > MAX_PEAKS) throw new BadRequest('bad body');
+  const maxFrame = Math.ceil((q.durationMs / 1000) * FRAMES_PER_SEC) + 64;
+  // Peaks are non-negative and ascending (decodeScanBody); hashes built from
+  // them are in range by construction.
+  if (q.peaks.t.length && q.peaks.t[q.peaks.t.length - 1] > maxFrame) throw new BadRequest('bad body');
+  return { durationMs: q.durationMs, hashes: q.hashes, times: q.times, peaks: q.peaks };
 }
 
 // Project ref inside a legacy JWT key (null for sb_ keys).
@@ -79,7 +80,8 @@ export function moonshots(env) {
   };
   const rpc = (name, args) => call(`rpc/${name}`, { method: 'POST', body: JSON.stringify(args) });
   return {
-    lookup: (hashes, times) => rpc('ms006_match', { p_hashes: Array.from(hashes), p_times: Array.from(times) }),
+    // ~60 s of video per ms006_match call (see slicedLookup in match.js).
+    lookup: slicedLookup((hashes, times) => rpc('ms006_match', { p_hashes: Array.from(hashes), p_times: Array.from(times) })),
     async trackWindow(tid, from, to) {
       const [row] = await rpc('ms006_track_window', { p_tid: tid, p_from: Math.floor(from), p_to: Math.ceil(to) });
       return { hashes: row?.hashes ?? [], times: row?.times ?? [] };
@@ -92,7 +94,7 @@ export function moonshots(env) {
 
 export async function handleScan(request, env) {
   const length = Number(request.headers.get('Content-Length') || 0);
-  if (length > 12 + MAX_HASHES * 8) return json({ error: 'body too large' }, 413);
+  if (length > MAX_BODY_BYTES) return json({ error: 'body too large' }, 413);
   let query;
   try {
     query = parseScanBody(await request.arrayBuffer());

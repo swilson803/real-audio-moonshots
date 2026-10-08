@@ -65,7 +65,7 @@ async function duration(file) {
   return Number(stdout.trim());
 }
 
-async function listAudio(dir) {
+export async function listAudio(dir) {
   const out = [];
   for (const e of await readdir(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
@@ -76,7 +76,7 @@ async function listAudio(dir) {
 }
 
 // Voice-over of `seconds`, from seeded clips laid end to end, at VOICE_LUFS.
-async function voice(speechFiles, seconds, r, tmp, name) {
+export async function voice(speechFiles, seconds, r, tmp, name) {
   const picked = [];
   let total = 0;
   while (total < seconds) {
@@ -95,7 +95,7 @@ async function voice(speechFiles, seconds, r, tmp, name) {
 
 // A music stem: `len` s of `src` from `from`, short fades, at
 // VOICE_LUFS + levelDb, delayed to start at `at`.
-async function music(src, from, len, at, levelDb, tmp, name) {
+export async function music(src, from, len, at, levelDb, tmp, name) {
   const cut = join(tmp, `${name}.cut.wav`);
   await ffmpeg(['-ss', String(from), '-t', String(len), '-i', src, '-ac', '2', '-ar', '48000',
     '-af', `afade=t=in:d=0.3,afade=t=out:st=${len - 0.5}:d=0.5`, cut]);
@@ -106,7 +106,7 @@ async function music(src, from, len, at, levelDb, tmp, name) {
 }
 
 // Mix the voice with any music stems and encode with a plain video track.
-async function video(voiceWav, musicWavs, seconds, out, variant = 'mp4') {
+export async function video(voiceWav, musicWavs, seconds, out, variant = 'mp4') {
   const inputs = [voiceWav, ...musicWavs].flatMap((f) => ['-i', f]);
   const n = 1 + musicWavs.length;
   const mix = n === 1
@@ -138,7 +138,7 @@ const pickDistinct = (list, n, r) => {
 };
 
 // One quiet-bed video: a catalog track (local file) under the voice.
-async function quietVideo({ track, speechFiles, r, levelDb, name, variant, tmp, outDir }) {
+async function quietVideo({ track, speechFiles, r, levelDb, name, variant, tmp, outDir, kind }) {
   const at = 2 + r() * 8;
   const len = 45;
   const src = await fileOf(track);
@@ -148,7 +148,7 @@ async function quietVideo({ track, speechFiles, r, levelDb, name, variant, tmp, 
   const ext = variant === 'webm' ? 'webm' : variant === 'mov' ? 'mov' : 'mp4';
   const file = `${name}.${ext}`;
   await video(v, [m], 60, join(outDir, file), variant);
-  return { file, kind: 'quiet', level_db: levelDb, variant, from_s: Math.round(from * 100) / 100, expect: [expectOf(track, Math.round(at * 100) / 100)] };
+  return { file, kind, level_db: levelDb, variant, from_s: Math.round(from * 100) / 100, expect: [expectOf(track, Math.round(at * 100) / 100)] };
 }
 
 // catalog: [{ track_id, title, artist, file }] with local audio files, or
@@ -193,7 +193,7 @@ export async function makeVideos({ catalog, speechFiles, outDir, seed = 6006, tw
     if (tracks.length < 10) throw new Error(`need 10 catalog tracks of 50 s or more for ${prefix}, have ${tracks.length}`);
     for (let i = 0; i < 10; i++) {
       const name = `${prefix}_${String(i + 1).padStart(2, '0')}`;
-      manifest.push(await quietVideo({ track: tracks[i], speechFiles, r, levelDb: -20, name, variant: VARIANTS[i + 1] || 'mp4', tmp, outDir }));
+      manifest.push(await quietVideo({ track: tracks[i], speechFiles, r, levelDb: -20, name, variant: VARIANTS[i + 1] || 'mp4', tmp, outDir, kind: prefix.includes('dev') ? 'dev' : 'quiet' }));
       log(`made ${name}`);
     }
   }
@@ -203,7 +203,7 @@ export async function makeVideos({ catalog, speechFiles, outDir, seed = 6006, tw
     for (const level of [-12, -16, -20, -24, -28]) {
       for (const [i, track] of pickDistinct(longEnough(catalog, 50), 5, r).entries()) {
         const name = `RA_TEST_sweep_${-level}db_${i + 1}`;
-        manifest.push(await quietVideo({ track, speechFiles, r, levelDb: level, name, variant: 'mp4', tmp, outDir }));
+        manifest.push(await quietVideo({ track, speechFiles, r, levelDb: level, name, variant: 'mp4', tmp, outDir, kind: 'sweep' }));
       }
       log(`made sweep ${level} dB`);
     }

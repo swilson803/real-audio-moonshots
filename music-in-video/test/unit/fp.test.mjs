@@ -2,7 +2,9 @@
 // resampler, silence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Fingerprinter, Resampler, SAMPLE_RATE, fingerprint, packHash, unpackHash } from '../../public/music/fp.js';
+import { createHash } from 'node:crypto';
+import { Fingerprinter, QUERY, Resampler, SAMPLE_RATE, fingerprint, packHash, unpackHash } from '../../public/music/fp.js';
+import { place, synthSpeech } from '../synth.mjs';
 import { synthMusic, tone } from '../synth.mjs';
 
 test('hash packs and unpacks f1, f2, dt in 24 bits', () => {
@@ -26,7 +28,7 @@ test('the same audio gives the same hashes however it is chunked', () => {
 
 test('music gives roughly 20 peaks and 40 hashes a second (the index size budget)', () => {
   const r = fingerprint(synthMusic(7, 30));
-  assert.ok(r.peaks / 30 > 10 && r.peaks / 30 < 30, `peaks/s ${r.peaks / 30}`);
+  assert.ok(r.peakCount / 30 > 10 && r.peakCount / 30 < 30, `peaks/s ${r.peakCount / 30}`);
   assert.ok(r.hashes.length / 30 > 25 && r.hashes.length / 30 < 50, `hashes/s ${r.hashes.length / 30}`);
 });
 
@@ -73,4 +75,42 @@ test('resampler removes content above the new Nyquist', () => {
   let rms = 0;
   for (let i = 1000; i < y.length - 1000; i++) rms += y[i] * y[i];
   assert.ok(Math.sqrt(rms / (y.length - 2000)) < 0.01, 'an 11 kHz tone must not alias into 16 kHz audio');
+});
+
+// The index in moonshots was built with FP_VERSION 1 (1d14553). The default
+// (index) fingerprint must stay byte-identical, or the index must be rebuilt.
+test('index fingerprint is unchanged from the built index (golden digest)', () => {
+  const fp = fingerprint(place(synthMusic(7, 30), synthSpeech(8, 30), 0, -6));
+  const digest = createHash('sha256').update(Buffer.from(fp.hashes.buffer)).update(Buffer.from(fp.times.buffer)).digest('hex');
+  assert.equal(fp.hashes.length, 1059);
+  assert.equal(digest, '8c86c70be10ffc69f0066e8620816028e61feb03a9c32834f47874543c2973e0');
+});
+
+test('QUERY keeps every index peak (superset) and adds more', () => {
+  const audio = place(synthMusic(21, 20), synthSpeech(22, 20), 0, 6); // a voice louder than the music
+  const key = (fp) => new Set(Array.from(fp.peakT, (t, i) => t * 512 + fp.peakF[i]));
+  const index = key(fingerprint(audio, { verifyPeaks: {} }));
+  const query = key(fingerprint(audio, { binsPerBand: QUERY.binsPerBand, rank: QUERY.rank, verifyPeaks: {} }));
+  for (const k of index) assert.ok(query.has(k), `index peak ${k} missing from the query`);
+  assert.ok(query.size > 1.5 * index.size, `${query.size} vs ${index.size}`);
+});
+
+test('QUERY: no near-simultaneous low pairs; verification peaks equal a separate pass', () => {
+  const audio = synthMusic(23, 15);
+  const q = fingerprint(audio, QUERY);
+  const lowBin = Math.floor(QUERY.skipLowPairsBelowHz / (SAMPLE_RATE / 1024));
+  for (const h of q.hashes) {
+    const [f1, f2, dt] = unpackHash(h);
+    assert.ok(!(dt < 4 && f1 < lowBin && f2 < lowBin), `low pair ${f1},${f2},${dt}`);
+  }
+  const { rank, peakHalfWidth, minRise } = QUERY.verifyPeaks;
+  const sep = fingerprint(audio, { binsPerBand: QUERY.binsPerBand, rank, peakHalfWidth, minRise, verifyPeaks: {} });
+  assert.deepEqual(q.peakT, sep.peakT);
+  assert.deepEqual(q.peakF, sep.peakF);
+  // and chunking still doesn't matter
+  const fp = new Fingerprinter(QUERY);
+  for (let i = 0; i < audio.length; i += 3001) fp.push(audio.subarray(i, i + 3001));
+  const chunked = fp.finish();
+  assert.deepEqual(chunked.hashes, q.hashes);
+  assert.deepEqual(chunked.peakT, q.peakT);
 });

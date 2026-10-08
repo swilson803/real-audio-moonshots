@@ -5,7 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../../src/worker.js';
-import { FP_VERSION, fingerprint } from '../../public/music/fp.js';
+import { FP_VERSION, QUERY, fingerprint } from '../../public/music/fp.js';
+import { encodeScanBody } from '../../public/music/body.js';
 import { syntheticCatalog } from '../fixtures.mjs';
 import { place, slice, synthSpeech } from '../synth.mjs';
 
@@ -60,13 +61,9 @@ const env = {
 };
 const call = (path, init, e = env) => worker.fetch(new Request(`https://copyrighttester.real.audio${path}`, init), e, { waitUntil() {} });
 
+// The body the page sends: the QUERY fingerprint (hashes + verification peaks).
 function body(audio, durationMs = Math.round((audio.length / 16000) * 1000)) {
-  const { hashes, times } = fingerprint(audio);
-  const b = new Int32Array(3 + 2 * hashes.length);
-  b.set([FP_VERSION, durationMs, hashes.length]);
-  b.set(hashes, 3);
-  b.set(times, 3 + hashes.length);
-  return b.buffer;
+  return encodeScanBody({ ...fingerprint(audio, QUERY), durationMs });
 }
 const scan = (buf, headers = {}, e = env) => call('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', ...headers }, body: buf }, e);
 
@@ -117,19 +114,26 @@ test('POST /api/scan rejects bad bodies', async () => {
   wrongVersion[0] = FP_VERSION + 1;
   const tooLong = good.slice();
   tooLong[1] = 21 * 60 * 1000;
-  const badHash = good.slice();
-  if (badHash[2] > 0) badHash[3] = 1 << 24;
+  assert.ok(good[2] > 0, 'peaks');
+  const badPeak = good.slice();
+  badPeak[3] = -1;
+  const tooManyPeaks = good.slice();
+  tooManyPeaks[2] += 1;
+  const lateness = good.slice();
+  lateness[2 + good[2]] = (21 * 60 * 63) * 512; // a peak after the video's end
   for (const [name, buf, status] of [
     ['empty', new ArrayBuffer(0), 400],
     ['ragged', new ArrayBuffer(10), 400],
     ['wrong version', wrongVersion.buffer, 400],
     ['over 20 minutes', tooLong.buffer, 400],
-    ['hash out of range', badHash.buffer, 400],
+    ['peak out of range', badPeak.buffer, 400],
+    ['peak count mismatch', tooManyPeaks.buffer, 400],
+    ['peak after the end', lateness.buffer, 400],
     ['count mismatch', good.slice(0, good.length - 1).buffer, 400],
   ]) {
     assert.equal((await scan(buf)).status, status, name);
   }
-  assert.equal((await scan(new ArrayBuffer(8), { 'Content-Length': String(5e6) })).status, 413);
+  assert.equal((await scan(new ArrayBuffer(8), { 'Content-Length': String(2e6) })).status, 413);
   assert.equal((await call('/api/scan')).status, 404, 'GET /api/scan');
 });
 

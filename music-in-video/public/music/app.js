@@ -1,8 +1,8 @@
 // Upload page: read the chosen video's soundtrack on this device, send only
 // its fingerprint to the Worker, show the result link and the copy line.
-import { FP_VERSION } from './fp.js';
 import { ExtractError, fingerprintVideo } from './extract.js';
 import { showCopyLine } from './copy.js';
+import { encodeScanBody } from './body.js';
 
 const $ = (id) => document.getElementById(id);
 const form = $('scan-form');
@@ -38,15 +38,6 @@ fileInput.addEventListener('change', () => {
   fileError.textContent = file ? validate(file) || '' : '';
 });
 
-// Body for POST /api/scan (src/scan.js parseScanBody).
-function scanBody({ hashes, times, durationMs }) {
-  const body = new Int32Array(3 + 2 * hashes.length);
-  body.set([FP_VERSION, durationMs, hashes.length]);
-  body.set(hashes, 3);
-  body.set(times, 3 + hashes.length);
-  return body.buffer;
-}
-
 function showResult(result) {
   form.hidden = true;
   if (!result.found) {
@@ -80,7 +71,7 @@ form.addEventListener('submit', async (e) => {
     const headers = { 'Content-Type': 'application/octet-stream' };
     // Test videos (RA_TEST_...) are labelled so their scans can be cleared.
     if (/^RA_TEST_[A-Za-z0-9._-]{1,80}$/.test(file.name)) headers['x-scan-label'] = file.name;
-    const res = await fetch('/api/scan', { method: 'POST', headers, body: scanBody(fp) });
+    const res = await fetch('/api/scan', { method: 'POST', headers, body: encodeScanBody(fp) });
     if (!res.ok) throw new Error(`scan ${res.status}`);
     statusEl.textContent = '';
     showResult(await res.json());

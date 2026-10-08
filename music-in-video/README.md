@@ -17,19 +17,46 @@ collision.
 `public/music/extract.js` reads the file in slices in the browser (mp4box.js +
 WebCodecs for MP4/MOV/M4V with AAC; decodeAudioData for WebM or without
 WebCodecs), downmixes and resamples to 16 kHz and fingerprints as it decodes.
-Only the fingerprint (~20 KB a minute) is POSTed. Nothing stores the video or
-its audio; `ms006_scans` keeps only the result.
+Only the fingerprint is POSTed: the verification peaks plus one bit each
+marking the hash peaks (`public/music/body.js`, ~30 KB a minute); the Worker
+rebuilds the hashes from them with the same code. Nothing stores the video
+or its audio; `ms006_scans` keeps only the result.
 
 ## Matching (`public/music/fp.js`, `src/match.js`)
 Landmark fingerprints: spectral peaks picked per frequency band after a
-running-mean whitening (bass and hats keep producing peaks under speech),
-paired into 24-bit hashes (each peak with the next 2, `FANOUT`). Stage 1 (Postgres `ms006_match`) groups hash hits
-by track and time offset. Stage 2 verifies each candidate alignment with single
-peak coincidences, rebuilt from the hashes, against an off-alignment chance
-level, gives each second of the video to the locally strongest alignment
-(music repeats), and sets start and end from where coincidences are dense.
-`clustersInMemory` / `trackWindowInMemory` mirror the two RPCs for tests;
-`test/unit/sql.test.mjs` checks they agree.
+running-mean whitening, paired into 24-bit hashes.
+- The index (`fingerprint()` defaults, FP_VERSION 1): one bin per band and
+  frame, each peak paired with the next 2. Unchanged since the index build
+  (a golden-digest test pins it).
+- The video (`QUERY`, phase 2 round B): the 3 strongest bins per band and
+  frame, kept if fewer than 3 stronger within the window, so music peaks
+  behind a louder voice survive (a superset of the index's peaks); each
+  peak paired with the next 4; no near-simultaneous pairs below 600 Hz
+  (most of the lookup's work, little identity); plus a denser peak list
+  (+-4 frames, rise >= 0.15) for verification only.
+- Stage 1 (Postgres `ms006_match`, one call per ~60 s of video,
+  `slicedLookup`): hash hits by track and time offset; candidates from 3
+  hits, the 16 strongest.
+- Stage 2 (Worker): single-peak coincidences of the video with each
+  candidate's track at its alignment, against the chance distribution at 24
+  off-alignment shifts (z >= 6, ratio >= 2); the audible stretch is where a
+  ~4 s window beats chance, its start and end Poisson change points; each
+  second goes to the locally strongest alignment (music repeats); rows
+  need 30 coincidences and z >= 5 over their own span; touching rows of one
+  track merge.
+`clustersInMemory` / `trackWindowInMemory` mirror the two RPCs (tests, the
+replica); `test/unit/sql.test.mjs` checks they agree.
+
+Accuracy (round B, offline replica of the real index, LibriSpeech voice,
+music 20 dB under it, right track +-1 s and nothing else): dev 20/30 over
+three dev sets (8/10 on the phase-2 dev set); 17/17 negatives clean
+(voice only, synthetic music, real music left out of the index); sweep
+-12/-16/-20/-24/-28 dB 5/5, 2/5, 4/5, 4/5, 3/5. Misses are quiet clips whose
+first seconds (or all) are inaudible under the voice to peak landmarks.
+
+Cost per 60 s of video: one `ms006_match` call joining ~75k index rows (max
+~98k), 16 `ms006_track_window` calls, ~110 ms of Worker CPU (Workers Paid;
+over the Free plan's 10 ms).
 
 ## Supabase: moonshots only
 `supabase/migrations/20261007000000_ms006_track_detection.sql`, applied to
@@ -73,6 +100,15 @@ result page's Play button streaming a track's public `track_ref`.
   DB answers cached; `--set NAME=VALUE` tries matcher overrides
   (`TUNABLES` in `src/match.js`).
 - `scripts/clear-test-scans.mjs`: delete the `RA_TEST_` scans from moonshots.
+- `scripts/replica.mjs`: the offline replica of the index (fingerprints of
+  the cached catalog, matched in memory; `--index-opts` builds an
+  experimental index variant).
+- `scripts/make-negatives.mjs`: extra negative videos (one LibriSpeech
+  speaker each; voice only, synthetic music, real catalog music left out
+  of the index).
+- Manifest kinds come from file names (`scripts/lib/kinds.mjs`):
+  `RA_TEST_quiet_*` acceptance, `RA_TEST_dev_quiet_*` dev,
+  `RA_TEST_sweep_*` sweep.
 - `scripts/build-assets.mjs`: the asset merge (root `npm run build`).
 - `scripts/make-headline.mjs`: renders the stand-in headline PNG.
 
@@ -96,13 +132,24 @@ the cache.
      --speech-dir /workspace/ms006/librispeech --out /workspace/ms006/videos \
      [--only two_tracks,no_music,quiet,dev] [--two-tracks ID,ID]
    ```
-3. Tuning on the dev videos only (round B):
+3. Tuning on the dev videos only (round B). Offline, on a replica of the
+   index rebuilt from the cache (no keys, no network):
+   ```
+   node scripts/replica.mjs --cache-dir /workspace/ms006/audio-cache --out /workspace/ms006/replica
+   node scripts/make-negatives.mjs --catalog-dir /workspace/ms006/audio-cache \
+     --speech-dir /workspace/ms006/librispeech/LibriSpeech/test-clean --out /workspace/ms006/videos-dev-neg
+   node scripts/tune.mjs --replica /workspace/ms006/replica --catalog-dir /workspace/ms006/audio-cache \
+     --manifest /workspace/ms006/videos/manifest.json --manifest /workspace/ms006/videos-dev-neg/manifest.json \
+     --kind dev,sweep,no_music,two_tracks --out /workspace/ms006/replica/tune [--set NAME=VALUE …]
+   ```
+   or against the real index (dev / sweep / no_music only; leave-one-out
+   negatives are replica-only):
    ```
    SUPABASE_URL=… SUPABASE_SECRET_KEY=… node scripts/tune.mjs \
-     --manifest /workspace/ms006/videos/manifest.json --kind dev \
+     --manifest /workspace/ms006/videos/manifest.json --kind dev,sweep,no_music \
      --out /workspace/ms006/tune [--set NAME=VALUE …]
    ```
-   (add `--offline` to re-run from the cache only.)
+   `--kind quiet` (the acceptance set) is refused unless `--allow-acceptance`.
 4. Browser suite against the real index (`npm run build` first):
    ```
    SUPABASE_URL=… SUPABASE_SECRET_KEY=… VIDEOS=/workspace/ms006/videos \
@@ -136,8 +183,9 @@ the cache.
 ## Not final
 - The headline PNG is a rendered stand-in (Patrick Hand, hatched) for
   Spencer's hand-drawn art.
-- Thresholds in `src/match.js` are tuned on synthetic audio only; phase 2
-  calibrates them on the dev videos made from the real catalog.
+- `src/match.js` defaults and the `QUERY` preset are tuned (round B) on an
+  offline replica of the real index with 30 dev videos and 17 negatives;
+  the acceptance videos (`RA_TEST_quiet_*`) were never used.
 
 Third-party files: mp4box.js (BSD-3-Clause, `public/music/vendor/mp4box/LICENSE`),
 Patrick Hand and Inter (SIL OFL 1.1, `public/music/fonts/`).

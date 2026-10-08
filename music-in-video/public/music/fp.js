@@ -33,6 +33,7 @@ const PEAK_HALF_WIDTH = 12; // a band peak is the max over +-12 frames (~0.4 s)
 // anchor still contributes.
 const FANOUT = 2;
 const MAX_DT = 63; // frames (~1 s); 6 bits in the hash
+const SHORT_DT = 4;
 
 // hash = f1 (9 bits) | f2 (9 bits) | dt (6 bits)
 export const packHash = (f1, f2, dt) => (f1 << 15) | (f2 << 6) | dt;
@@ -86,7 +87,34 @@ function fft(re, im) {
 // in memory as raw audio), then finish(). The result doesn't depend on how
 // the audio was chunked.
 export class Fingerprinter {
-  constructor() {
+  // Options; the defaults are the index's rule (scripts/build-catalog-index),
+  // the browser uses QUERY:
+  //   binsPerBand    candidates per band per frame: its strongest bins
+  //   rank           a candidate is a peak if fewer than `rank` candidates
+  //                  of its band within +-peakHalfWidth frames are stronger
+  //   peakHalfWidth  the time window a peak competes in
+  //   minRise        smallest whitened rise a peak needs (log units)
+  //   fanout         target peaks paired with each anchor
+  //   skipLowPairsBelowHz  no pairs of two peaks both below this frequency
+  //                  and under SHORT_DT frames apart (query side: near-
+  //                  simultaneous bass/kick pairs are common to many tracks,
+  //                  make most of the index lookup's work and say little
+  //                  about which track it is)
+  //   verifyPeaks    also return a second, denser peak list (same options
+  //                  shape: binsPerBand is shared) for stage-2 verification
+  // binsPerBand = rank = 1 is one bin per band and frame, the band's best
+  // within +-12 frames. Larger values give a superset: a music peak can be
+  // second in its band behind a louder voice and still be kept, so the query
+  // holds the index's peaks even under speech.
+  constructor({
+    binsPerBand = 1, rank = 1, peakHalfWidth = PEAK_HALF_WIDTH, minRise = MIN_RISE,
+    fanout = FANOUT, skipLowPairsBelowHz = 0, verifyPeaks = null,
+  } = {}) {
+    this.k = binsPerBand;
+    this.pick = { rank, halfWidth: peakHalfWidth, minRise };
+    this.verifyPick = verifyPeaks && { rank: verifyPeaks.rank ?? rank, halfWidth: verifyPeaks.peakHalfWidth ?? peakHalfWidth, minRise: verifyPeaks.minRise ?? minRise };
+    this.fanout = fanout;
+    this.skipLowBin = lowBin(skipLowPairsBelowHz);
     this.ring = new Float32Array(N_FFT);
     this.filled = 0; // samples received so far
     this.sinceFrame = 0; // samples since the last frame
@@ -119,17 +147,25 @@ export class Fingerprinter {
     fft(re, im);
     const first = !this.mean;
     if (first) this.mean = new Float64Array(NBINS);
-    const vals = new Float32Array(NBANDS).fill(-Infinity);
-    const bins = new Int16Array(NBANDS).fill(-1);
+    // K best (whitened value, bin) per band, best first.
+    const K = this.k;
+    const vals = new Float32Array(NBANDS * K).fill(-Infinity);
+    const bins = new Int16Array(NBANDS * K).fill(-1);
     for (let k = 0; k < NBANDS; k++) {
       const [lo, hi] = BANDS[k];
+      const o = k * K;
       for (let b = lo; b <= hi; b++) {
         const raw = Math.log(Math.sqrt(re[b] * re[b] + im[b] * im[b]) + 1e-5);
         const prev = first ? raw : this.mean[b];
         this.mean[b] = prev + WHITEN_ALPHA * (raw - prev);
         if (raw < RAW_FLOOR) continue;
         const v = raw - prev;
-        if (v > vals[k]) { vals[k] = v; bins[k] = b; }
+        if (v > vals[o + K - 1]) {
+          let j = K - 1;
+          while (j > 0 && v > vals[o + j - 1]) { vals[o + j] = vals[o + j - 1]; bins[o + j] = bins[o + j - 1]; j--; }
+          vals[o + j] = v;
+          bins[o + j] = b;
+        }
       }
     }
     this.bandVal.push(vals);
@@ -137,42 +173,108 @@ export class Fingerprinter {
     this.frames++;
   }
 
-  finish() {
+  // Peaks [t, bin] in (t, frequency) order under one picking rule.
+  peaksBy({ rank: R, halfWidth: W, minRise }) {
     const n = this.frames;
+    const K = this.k;
     const peaks = [];
     for (let t = 0; t < n; t++) {
       for (let k = 0; k < NBANDS; k++) {
-        const v = this.bandVal[t][k];
-        if (!(v >= MIN_RISE)) continue;
-        let isMax = true;
-        for (let u = Math.max(0, t - PEAK_HALF_WIDTH); u <= Math.min(n - 1, t + PEAK_HALF_WIDTH) && isMax; u++) {
-          const w = this.bandVal[u][k];
-          if (w > v || (w === v && u < t)) isMax = false;
+        const o = k * K;
+        const found = [];
+        for (let j = 0; j < K; j++) {
+          const v = this.bandVal[t][o + j];
+          if (!(v >= minRise)) break;
+          // Stronger candidates of this band within the window (ties go to
+          // the earlier frame, then the better-ranked bin).
+          let stronger = 0;
+          for (let u = Math.max(0, t - W); u <= Math.min(n - 1, t + W) && stronger < R; u++) {
+            for (let i = 0; i < K && stronger < R; i++) {
+              if (u === t && i === j) continue;
+              const w = this.bandVal[u][o + i];
+              if (w > v || (w === v && (u < t || (u === t && i < j)))) stronger++;
+            }
+          }
+          if (stronger < R) found.push(this.bandBin[t][o + j]);
         }
-        if (isMax) peaks.push([t, this.bandBin[t][k]]);
+        found.sort((x, y) => x - y);
+        for (const b of found) peaks.push([t, b]);
       }
     }
-    // peaks are already in (t, band) order; band order is frequency order.
-    const hashes = [];
-    const times = [];
-    for (let i = 0; i < peaks.length; i++) {
-      const [t1, f1] = peaks[i];
-      let made = 0;
-      for (let j = i + 1; j < peaks.length && made < FANOUT; j++) {
-        const [t2, f2] = peaks[j];
-        const dt = t2 - t1;
-        if (dt > MAX_DT) break;
-        hashes.push(packHash(f1, f2, dt));
-        times.push(t1);
-        made++;
-      }
+    return peaks;
+  }
+
+  finish() {
+    const peaks = this.peaksBy(this.pick);
+    const { hashes, times } = pairPeaks(peaks, this.fanout, this.skipLowBin);
+    const out = { hashes, times, frames: this.frames, peakCount: peaks.length };
+    if (this.verifyPick) {
+      const vp = this.peaksBy(this.verifyPick);
+      out.peakT = Int32Array.from(vp, (p) => p[0]);
+      out.peakF = Int32Array.from(vp, (p) => p[1]);
+      // Which verification peaks are also hash peaks (a subset whenever the
+      // verification rule is looser: smaller window, lower rise, same rank),
+      // so the page can send the peaks once and the Worker rebuild the
+      // hashes with pairPeaks (body.js). A bin on a band edge (4 and 6 kHz)
+      // can be a peak of both bands, so a peak can occur twice: the first
+      // n occurrences of a key are flagged, n = its count among hash peaks.
+      const need = new Map();
+      for (const [t, f] of peaks) need.set(t * 512 + f, (need.get(t * 512 + f) || 0) + 1);
+      out.hashPeak = Uint8Array.from(vp, ([t, f]) => {
+        const k = t * 512 + f;
+        const left = need.get(k) || 0;
+        if (!left) return 0;
+        need.set(k, left - 1);
+        return 1;
+      });
+      out.hashPeaksCovered = [...need.values()].every((x) => x === 0);
     }
-    return { hashes: Int32Array.from(hashes), times: Int32Array.from(times), frames: n, peaks: peaks.length };
+    return out;
   }
 }
 
-export function fingerprint(samples) {
-  const fp = new Fingerprinter();
+// Hashes from peaks [t, bin] in (t, frequency) order: each anchor with its
+// next `fanout` peaks within MAX_DT frames, minus near-simultaneous pairs of
+// two bins below skipLowBin. Shared by Fingerprinter and the Worker (which
+// rebuilds the query's hashes from the peaks the page sends).
+export function pairPeaks(peaks, fanout = FANOUT, skipLowBin = 0) {
+  const hashes = [];
+  const times = [];
+  for (let i = 0; i < peaks.length; i++) {
+    const [t1, f1] = peaks[i];
+    let made = 0;
+    for (let j = i + 1; j < peaks.length && made < fanout; j++) {
+      const [t2, f2] = peaks[j];
+      const dt = t2 - t1;
+      if (dt > MAX_DT) break;
+      if (dt < SHORT_DT && f1 < skipLowBin && f2 < skipLowBin) continue;
+      hashes.push(packHash(f1, f2, dt));
+      times.push(t1);
+      made++;
+    }
+  }
+  return { hashes: Int32Array.from(hashes), times: Int32Array.from(times) };
+}
+
+// Bin below which QUERY skips near-simultaneous pairs.
+export const lowBin = (hz) => Math.floor(hz / BIN_HZ);
+
+// The browser's query fingerprint (phase 2, tuned on the real catalog with
+// the offline replica): three candidate bins per band (the index keeps one),
+// so music under a voice keeps its peaks; four targets per anchor; no
+// near-simultaneous low pairs (most of the lookup's work, little identity);
+// and a denser peak list for stage-2 verification. Same hash layout as the
+// index, so the index is unchanged.
+export const QUERY = Object.freeze({
+  binsPerBand: 3,
+  rank: 3,
+  fanout: 4,
+  skipLowPairsBelowHz: 600,
+  verifyPeaks: Object.freeze({ rank: 3, peakHalfWidth: 4, minRise: 0.15 }),
+});
+
+export function fingerprint(samples, options) {
+  const fp = new Fingerprinter(options);
   fp.push(samples);
   return fp.finish();
 }
