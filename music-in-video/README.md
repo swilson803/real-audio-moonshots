@@ -54,6 +54,16 @@ three dev sets (8/10 on the phase-2 dev set); 17/17 negatives clean
 -12/-16/-20/-24/-28 dB 5/5, 2/5, 4/5, 4/5, 3/5. Misses are quiet clips whose
 first seconds (or all) are inaudible under the voice to peak landmarks.
 
+Cold start (fix 1): the first `ms006_match` after the database has been idle
+can hit PostgREST's 8 s statement timeout (500, code 57014). The Worker
+retries moonshots reads on that and on 502/503/504/520-524/network errors
+(`RETRY` in `src/scan.js`: 3 tries per read, 1 s then 2 s apart, at most 20
+retries and no new try after 40 s per request; the scan row is written once,
+never retried), and answers 503 `{"error":"busy"}` past the cap. The page
+shows "Still working… this can take up to a minute." after 5 s of matching,
+and "The Real Audio catalog is taking too long to answer. Try again in a
+minute." on busy.
+
 Cost per 60 s of video: one `ms006_match` call joining ~75k index rows (max
 ~98k), 16 `ms006_track_window` calls, ~110 ms of Worker CPU (Workers Paid;
 over the Free plan's 10 ms).

@@ -16,7 +16,7 @@
 // SUPABASE_SERVICE_ROLE_KEY.
 
 import clearance from '../../clearance-check/src/worker.js';
-import { handleScan, handleGetScan } from './scan.js';
+import { DbBusy, handleScan, handleGetScan } from './scan.js';
 
 const json = (body, status) => new Response(JSON.stringify(body), {
   status,
@@ -39,6 +39,9 @@ export default {
         return json({ error: 'not found' }, 404);
       } catch (err) {
         console.error('scan failed', err.message);
+        // busy: the database stayed unavailable past the retry cap (scan.js
+        // RETRY); the page says to try again in a minute.
+        if (err instanceof DbBusy) return json({ error: 'busy' }, 503);
         return json({ error: 'scan failed' }, 502);
       }
     }

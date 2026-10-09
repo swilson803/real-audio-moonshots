@@ -8,7 +8,7 @@
 //    page rows and the Play button;
 //  - production Tracks audio requested by Play is answered from local files
 //    (`catalog`), so it costs no egress; those requests are recorded.
-import { readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -36,8 +36,11 @@ export function judge(video, found, matches) {
  * @param shotsDir   screenshots
  * @param labelFor   optional (file) => x-scan-label for its POST /api/scan
  * @param check      (name, ok, detail) => void
+ * @param coldStart  optional { control, shotsDir, delayMs }: the fake
+ *                   moonshots' controls (test/fake-moonshots.mjs) for the
+ *                   cold-start checks (statement timeout on the first lookup)
  */
-export async function runBrowserSuite({ origin, videos, videosDir, catalog, shotsDir, labelFor = null, check }) {
+export async function runBrowserSuite({ origin, videos, videosDir, catalog, shotsDir, labelFor = null, check, coldStart = null }) {
   const { chromium } = require('playwright');
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/opt/google/chrome/chrome' });
   const browserRequests = [];
@@ -176,6 +179,70 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
     await p404.goto(`${origin}/v/Zzzzzzzzzz`);
     await p404.waitForFunction(() => document.getElementById('summary').textContent !== 'Loading…');
     check('unknown result link says so', (await p404.textContent('#summary')).includes('couldn’t find'));
+
+    // 2b. Cold start (MS-006 fix 1): the first lookup hits the database's
+    // statement timeout after a real wait. The page must show its
+    // still-working state, never an error, and end with the right result;
+    // a database that never answers must end in the clear busy message.
+    if (coldStart && two) {
+      const { control, shotsDir: coldShots, delayMs = 8000 } = coldStart;
+      await mkdir(coldShots, { recursive: true });
+      const watchErrors = (p) => p.evaluate(() => {
+        window.__errors = [];
+        const el = document.getElementById('form-error');
+        new MutationObserver(() => { if (el.textContent) window.__errors.push(el.textContent); })
+          .observe(el, { childList: true, characterData: true, subtree: true });
+      });
+      for (const width of [375, 768, 1280]) {
+        const touch = width === 375 ? { hasTouch: true, isMobile: true } : {};
+        const p = await newPage({ width, height: width === 375 ? 812 : 1000 }, touch);
+        await p.goto(`${origin}/music/`);
+        await p.evaluate(() => document.fonts.ready);
+        await watchErrors(p);
+        const inserts = control.scanInserts;
+        control.statementTimeouts({ next: 1, delayMs });
+        await p.setInputFiles('#file', join(videosDir, two.file));
+        const t0 = Date.now();
+        await p.click('#submit');
+        await p.waitForFunction(() => document.getElementById('status').textContent.startsWith('Still working'), null, { timeout: 60000 });
+        const working = { text: (await p.textContent('#status')).trim(), visible: await p.isVisible('#status'), at: Date.now() - t0 };
+        await p.screenshot({ path: `${coldShots}/cold-still-working-${width}.png`, fullPage: true });
+        await p.waitForFunction(() => !document.getElementById('found').hidden || !document.getElementById('none').hidden || document.getElementById('form-error').textContent, null, { timeout: 120000 });
+        const ms = Date.now() - t0;
+        await p.screenshot({ path: `${coldShots}/cold-found-${width}.png`, fullPage: true });
+        check(`cold start at ${width}: "Still working…" shown while waiting`, working.visible && working.text === 'Still working… this can take up to a minute.', `${JSON.stringify(working.text)} after ${working.at} ms`);
+        const errors = await p.evaluate(() => window.__errors);
+        check(`cold start at ${width}: no error shown`, errors.length === 0 && !(await p.textContent('#form-error')), JSON.stringify(errors));
+        check(`cold start at ${width}: the first lookup really timed out`, control.timeoutsServed === 1, `${control.timeoutsServed} timeouts served`);
+        let ok = false;
+        let got = [];
+        if (await p.isVisible('#found')) {
+          const id = (await p.getAttribute('#open-result', 'href')).split('/v/')[1];
+          const scan = await (await p.request.get(`${origin}/api/scans/${id}`)).json();
+          got = scan.matches.map((m) => [m.title, m.start_s]);
+          ok = judge(two, true, scan.matches);
+        }
+        check(`cold start at ${width}: both tracks found at the right times`, ok, `${JSON.stringify(got)} in ${ms} ms`);
+        check(`cold start at ${width}: one scan row (no duplicate insert)`, control.scanInserts === inserts + 1, `${control.scanInserts - inserts} inserts`);
+        await p.context().close();
+      }
+      // A database that keeps timing out: a clear message after the cap.
+      const p = await newPage({ width: 1280, height: 1000 });
+      await p.goto(`${origin}/music/`);
+      control.statementTimeouts({ always: true, delayMs: 1000 });
+      const inserts = control.scanInserts;
+      await p.setInputFiles('#file', join(videosDir, two.file));
+      const t0 = Date.now();
+      await p.click('#submit');
+      await p.waitForFunction(() => document.getElementById('form-error').textContent || !document.getElementById('found').hidden, null, { timeout: 120000 });
+      const msg = (await p.textContent('#form-error')).trim();
+      await p.screenshot({ path: `${coldShots}/cold-busy-1280.png`, fullPage: true });
+      check('database that never answers: clear message after the retry cap', msg === 'The Real Audio catalog is taking too long to answer. Try again in a minute.' && !(await p.isVisible('#found')),
+        `${JSON.stringify(msg)} after ${Date.now() - t0} ms, ${control.timeoutsServed} timed-out lookups`);
+      check('database that never answers: no scan row', control.scanInserts === inserts);
+      control.statementTimeouts({});
+      await p.context().close();
+    }
 
     // 3. Browser requests: this site, or production Tracks GETs (routed locally).
     const bad = browserRequests.filter(({ method, url }) => {

@@ -65,20 +65,67 @@ function jwtRef(key) {
   }
 }
 
-// Moonshots REST client with the service role.
-export function moonshots(env) {
+// Retries for moonshots READS (the two RPCs and the catalog select), per
+// request: a cold database's first ms006_match can hit PostgREST's 8 s
+// statement timeout (HTTP 500, code 57014) and succeed seconds later. Only
+// transient failures are retried: that timeout, 502/503/504/520-524, and
+// network errors. Each read gets at most ATTEMPTS tries, with BACKOFF_MS
+// between them; the request as a whole gets at most RETRIES extra tries
+// (so a scan stays far below the Worker's 50-subrequest limit: ~20 reads +
+// 20) and starts no new try after DEADLINE_MS (worst case about 50 s, well
+// inside Cloudflare's 100 s). Writes (the scan row) are never retried.
+export const RETRY = Object.freeze({ ATTEMPTS: 3, BACKOFF_MS: [1000, 2000], RETRIES: 20, DEADLINE_MS: 40000 });
+
+// The database stayed unavailable (transient errors) past the retry cap.
+export class DbBusy extends Error {}
+
+export function isTransient(status, body = '') {
+  if ([502, 503, 504, 520, 521, 522, 523, 524].includes(status)) return true;
+  return status === 500 && /57014|statement timeout/.test(body);
+}
+
+// Moonshots REST client with the service role. opts (tests): retry policy
+// overrides, sleep, now.
+export function moonshots(env, { retry = RETRY, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now } = {}) {
   const base = (env.SUPABASE_URL || '').replace(/\/+$/, '');
   if (!base || base.includes(PRODUCTION_REF)) throw new Error('Refusing to talk to Real Audio production Supabase');
   const key = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY;
   const ref = jwtRef(key);
   if (ref && ref !== MOONSHOTS_REF) throw new Error('Refusing a Supabase key for another project');
   const headers = { ...supabaseHeaders(key), 'Content-Type': 'application/json' };
-  const call = async (path, init = {}) => {
-    const res = await fetch(`${base}/rest/v1/${path}`, { ...init, headers: { ...headers, ...init.headers } });
-    if (!res.ok) throw new Error(`${path.split('?')[0]} ${res.status}: ${await res.text()}`);
-    return res.status === 201 || res.status === 204 ? null : res.json();
+  const deadline = now() + retry.DEADLINE_MS;
+  let retriesLeft = retry.RETRIES;
+  const once = async (path, init) => {
+    let res;
+    try {
+      res = await fetch(`${base}/rest/v1/${path}`, { ...init, headers: { ...headers, ...init.headers } });
+    } catch (err) {
+      return { transient: true, error: `${path.split('?')[0]}: ${err.message}` };
+    }
+    if (res.ok) return { value: res.status === 201 || res.status === 204 ? null : await res.json() };
+    const text = await res.text();
+    return { transient: isTransient(res.status, text), error: `${path.split('?')[0]} ${res.status}: ${text}` };
   };
-  const rpc = (name, args) => call(`rpc/${name}`, { method: 'POST', body: JSON.stringify(args) });
+  // A write: one try.
+  const call = async (path, init = {}) => {
+    const r = await once(path, init);
+    if ('value' in r) return r.value;
+    throw new Error(r.error);
+  };
+  // A read: transient failures retried within the request's cap.
+  const read = async (path, init = {}) => {
+    for (let attempt = 1; ; attempt++) {
+      const r = await once(path, init);
+      if ('value' in r) return r.value;
+      if (!r.transient) throw new Error(r.error);
+      const wait = retry.BACKOFF_MS[Math.min(attempt - 1, retry.BACKOFF_MS.length - 1)];
+      if (attempt >= retry.ATTEMPTS || retriesLeft <= 0 || now() + wait >= deadline) throw new DbBusy(r.error);
+      retriesLeft--;
+      console.warn(`moonshots read retry ${attempt}: ${r.error.slice(0, 160)}`);
+      await sleep(wait);
+    }
+  };
+  const rpc = (name, args) => read(`rpc/${name}`, { method: 'POST', body: JSON.stringify(args) });
   return {
     // ~60 s of video per ms006_match call (see slicedLookup in match.js).
     lookup: slicedLookup((hashes, times) => rpc('ms006_match', { p_hashes: Array.from(hashes), p_times: Array.from(times) })),
@@ -86,13 +133,13 @@ export function moonshots(env) {
       const [row] = await rpc('ms006_track_window', { p_tid: tid, p_from: Math.floor(from), p_to: Math.ceil(to) });
       return { hashes: row?.hashes ?? [], times: row?.times ?? [] };
     },
-    catalog: (tids) => call(`ms006_catalog?tid=in.(${tids.join(',')})&select=tid,track_id,title,artist,stream_url`),
+    catalog: (tids) => read(`ms006_catalog?tid=in.(${tids.join(',')})&select=tid,track_id,title,artist,stream_url`),
     insertScan: (row) => call('ms006_scans', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(row) }),
-    getScan: (id) => call(`ms006_scans?id=eq.${id}&found=is.true&select=id,created_at,duration_s,matches`),
+    getScan: (id) => read(`ms006_scans?id=eq.${id}&found=is.true&select=id,created_at,duration_s,matches`),
   };
 }
 
-export async function handleScan(request, env) {
+export async function handleScan(request, env, dbOptions) {
   const length = Number(request.headers.get('Content-Length') || 0);
   if (length > MAX_BODY_BYTES) return json({ error: 'body too large' }, 413);
   let query;
@@ -102,7 +149,7 @@ export async function handleScan(request, env) {
     if (err instanceof BadRequest) return json({ error: err.message }, 400);
     throw err;
   }
-  const db = moonshots(env);
+  const db = moonshots(env, dbOptions);
   const segments = await match(query, db);
   const tracks = segments.length ? await db.catalog([...new Set(segments.map((s) => s.tid))]) : [];
   const byTid = new Map(tracks.map((t) => [t.tid, t]));

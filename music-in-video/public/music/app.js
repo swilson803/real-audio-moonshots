@@ -16,6 +16,13 @@ const formError = $('form-error');
 const submit = $('submit');
 
 const TYPES = /\.(mp4|mov|m4v|webm)$/i;
+// Matching normally takes a few seconds; the first scan after the catalog
+// database has been idle can take much longer (the Worker retries it). Past
+// STILL_WORKING_MS the page says so and keeps waiting.
+const STILL_WORKING_MS = 5000;
+const STILL_WORKING = 'Still working… this can take up to a minute.';
+const BUSY = 'The Real Audio catalog is taking too long to answer. Try again in a minute.';
+
 const MESSAGES = {
   'no-audio': 'We couldn’t find a soundtrack in that video.',
   'too-long': 'That video is longer than 20 minutes. Try a shorter one.',
@@ -71,16 +78,22 @@ form.addEventListener('submit', async (e) => {
     const headers = { 'Content-Type': 'application/octet-stream' };
     // Test videos (RA_TEST_...) are labelled so their scans can be cleared.
     if (/^RA_TEST_[A-Za-z0-9._-]{1,80}$/.test(file.name)) headers['x-scan-label'] = file.name;
-    const res = await fetch('/api/scan', { method: 'POST', headers, body: encodeScanBody(fp) });
+    const slow = setTimeout(() => { statusEl.textContent = STILL_WORKING; }, STILL_WORKING_MS);
+    let res;
+    try {
+      res = await fetch('/api/scan', { method: 'POST', headers, body: encodeScanBody(fp) });
+    } finally {
+      clearTimeout(slow);
+    }
+    if (res.status === 503 && (await res.clone().json().catch(() => ({}))).error === 'busy') throw new Error('busy');
     if (!res.ok) throw new Error(`scan ${res.status}`);
     statusEl.textContent = '';
     showResult(await res.json());
   } catch (error) {
     console.error(error);
     statusEl.textContent = '';
-    formError.textContent = error instanceof ExtractError
-      ? MESSAGES[error.code]
-      : 'Something went wrong. Try again.';
+    if (error instanceof ExtractError) formError.textContent = MESSAGES[error.code];
+    else formError.textContent = error.message === 'busy' ? BUSY : 'Something went wrong. Try again.';
   } finally {
     submit.disabled = false;
     submit.textContent = 'FIND MY MUSIC';

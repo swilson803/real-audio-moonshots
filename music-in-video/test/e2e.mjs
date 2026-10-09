@@ -8,7 +8,8 @@
 //    in test/browser-suite.mjs;
 //  - Play's production audio requests are answered locally, so nothing
 //    reaches any Supabase project.
-// Screenshots go to SHOTS (default /tmp/ms006_shots).
+// Screenshots go to SHOTS (default /tmp/ms006_shots); the cold-start ones
+// (statement timeout on the first lookup) to COLD_SHOTS.
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +19,10 @@ import { makeVideos } from '../scripts/make-test-videos.mjs';
 import { synthMusic, synthSpeech, wavBytes } from './synth.mjs';
 
 const SHOTS = process.env.SHOTS || '/tmp/ms006_shots';
+// Cold-start screenshots (fix 1); COLD_DELAY_MS mimics the database's 8 s
+// statement timeout on the first lookup.
+const COLD_SHOTS = process.env.COLD_SHOTS || join(SHOTS, 'cold-start');
+const COLD_DELAY_MS = Number(process.env.COLD_DELAY_MS || 8000);
 // A fresh directory per run, so parallel runs on one box can't collide.
 const WORK = await mkdtemp(join(tmpdir(), 'ms006_e2e-'));
 const results = [];
@@ -46,7 +51,10 @@ const videos = await makeVideos({ catalog, speechFiles, outDir: join(WORK, 'vide
 
 const server = await start({ catalog });
 try {
-  await runBrowserSuite({ origin: server.origin, videos, videosDir: join(WORK, 'videos'), catalog, shotsDir: SHOTS, check });
+  await runBrowserSuite({
+    origin: server.origin, videos, videosDir: join(WORK, 'videos'), catalog, shotsDir: SHOTS, check,
+    coldStart: { control: server.fake, shotsDir: COLD_SHOTS, delayMs: COLD_DELAY_MS },
+  });
   const workerHosts = [...new Set(server.workerRequests.map((r) => r.split(' ')[1].split('/')[0]))];
   check('Worker requests: only moonshots', workerHosts.every((h) => h === 'kucwpmtkctafzkivuqtu.supabase.co'), workerHosts.join(', '));
 } finally {

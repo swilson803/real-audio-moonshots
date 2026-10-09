@@ -6,8 +6,9 @@ import { serveWorker } from './serve.mjs';
 
 // catalog: [{ track_id, title, artist, file, stream_url }] with local audio.
 export async function start({ catalog, port }) {
-  const { scans, workerRequests } = await installFakeMoonshots({ catalog });
+  const { scans, workerRequests, control } = await installFakeMoonshots({ catalog });
   const env = { SUPABASE_URL: MOONSHOTS, SUPABASE_ANON_KEY: 'eyJanon.test', SUPABASE_SERVICE_ROLE_KEY: 'eyJservice.test' };
   const server = await serveWorker({ env, port });
-  return { origin: server.origin, scans, workerRequests, close: server.close };
+  // fake: the fake moonshots' controls (statement timeouts).
+  return { origin: server.origin, scans, workerRequests, fake: control, close: server.close };
 }

@@ -25,6 +25,18 @@ export async function installFakeMoonshots({ catalog }) {
   const scans = new Map();
   const workerRequests = [];
 
+  // Cold-start simulation: the next `next` ms006_match calls (or every call,
+  // with always) wait delayMs, then fail the way PostgREST does when the
+  // statement timeout cancels the query.
+  const timeouts = { next: 0, always: false, delayMs: 0, served: 0 };
+  const control = {
+    statementTimeouts({ next = 0, always = false, delayMs = 0 } = {}) {
+      Object.assign(timeouts, { next, always, delayMs, served: 0 });
+    },
+    get timeoutsServed() { return timeouts.served; },
+    get matchCalls() { return workerRequests.filter((r) => r.endsWith('/rest/v1/rpc/ms006_match')).length; },
+    get scanInserts() { return workerRequests.filter((r) => r === `POST ${new URL(MOONSHOTS).host}/rest/v1/ms006_scans`).length; },
+  };
   const reply = (body, status = 200) => new Response(body === null ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const localFetch = globalThis.fetch;
   globalThis.fetch = async (input, init = {}) => {
@@ -42,7 +54,15 @@ export async function installFakeMoonshots({ catalog }) {
     if (url.origin !== MOONSHOTS) throw new Error(`fake moonshots: network blocked (${url.host})`);
     const path = url.pathname.replace('/rest/v1/', '');
     const body = init.body ? JSON.parse(init.body) : null;
-    if (path === 'rpc/ms006_match') return reply(clustersInMemory(index, body.p_hashes, body.p_times));
+    if (path === 'rpc/ms006_match') {
+      if (timeouts.always || timeouts.next > 0) {
+        if (timeouts.next > 0) timeouts.next--;
+        timeouts.served++;
+        if (timeouts.delayMs) await new Promise((r) => setTimeout(r, timeouts.delayMs));
+        return reply({ code: '57014', details: null, hint: null, message: 'canceling statement due to statement timeout' }, 500);
+      }
+      return reply(clustersInMemory(index, body.p_hashes, body.p_times));
+    }
     if (path === 'rpc/ms006_track_window') return reply([trackWindowInMemory(byTid, body.p_tid, body.p_from, body.p_to)]);
     if (path === 'ms006_catalog') {
       const tids = url.searchParams.get('tid').match(/\d+/g).map(Number);
@@ -58,5 +78,5 @@ export async function installFakeMoonshots({ catalog }) {
     }
     return reply({ message: 'not found' }, 404);
   };
-  return { scans, workerRequests };
+  return { scans, workerRequests, control };
 }
