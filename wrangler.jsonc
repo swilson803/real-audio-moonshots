@@ -1,19 +1,32 @@
 // Root Wrangler config, for Cloudflare Workers Builds while its Root directory
-// is `/`. It serves the clearance-check experiment (MS-002); paths point into
-// clearance-check/. Keep in sync with clearance-check/wrangler.jsonc, which is
-// used once Builds root is set to clearance-check.
+// is `/`. One Worker serves two experiments (MS-006 Option B):
+//   - music-in-video (MS-006): /music/, /v/<id>, /api/scan, /api/scans/<id>
+//   - clearance-check (MS-002/MS-004): everything else and the cron, passed
+//     through unchanged by music-in-video/src/worker.js
+// Assets are both experiments' public/ folders merged into
+// music-in-video/dist by `npm run build` (root package.json), which Wrangler
+// runs before every deploy (build.command below).
+// name, crons, vars and previews are unchanged from the clearance-check-only
+// config, so the Worker, its domain, its secrets and its cron stay the same.
 //
-// Secrets (set on the Worker, never committed): SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY),
-// RESEND_API_KEY. Var SITE_URL (the site's public origin, set on the Worker)
-// is required for the results email cron (MS-004); optional var EMAIL_FROM.
+// Secrets (set on the Worker in the dashboard, never committed, untouched by
+// deploys): SUPABASE_SECRET_KEY (moonshots service role; the Worker also
+// accepts SUPABASE_SERVICE_ROLE_KEY), RESEND_API_KEY, SITE_URL (required by
+// the results email cron, MS-004), MOONSHOTS_SERVICE_ROLE_KEY.
+// keep_vars: SUPABASE_URL and SUPABASE_ANON_KEY are also plain-text Variables
+// in the dashboard; keep_vars stops `wrangler deploy` dropping dashboard
+// Variables (no values committed by it). The vars block below sets the same
+// two, to the moonshots values.
 {
   "name": "clearance-check",
-  "main": "clearance-check/src/worker.js",
+  "main": "music-in-video/src/worker.js",
   "compatibility_date": "2026-09-01",
+  "keep_vars": true,
+  "build": { "command": "npm run build" },
   "assets": {
-    "directory": "./clearance-check/public",
+    "directory": "./music-in-video/dist",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/r/*"]
+    "run_worker_first": ["/api/*", "/r/*", "/v/*"]
   },
   "vars": {
     // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).

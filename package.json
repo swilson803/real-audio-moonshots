@@ -1,0 +1,8 @@
+{
+  "name": "real-audio-moonshots",
+  "private": true,
+  "description": "One folder per experiment. The root Worker (wrangler.jsonc) serves music-in-video and clearance-check.",
+  "scripts": {
+    "build": "node music-in-video/scripts/build-assets.mjs"
+  }
+}

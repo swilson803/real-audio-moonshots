@@ -1,0 +1,343 @@
+/* Music in this video (MS-006) — Real Audio brand "sketched" system.
+   The COPIED block is verbatim from clearance-check/public/styles.css (itself
+   verbatim from real-audio-creator src/index.css), cut to the rules these
+   pages use (no text inputs, heavy or red boxes, or h1 scale), with two
+   changes: asset URLs
+   are relative (this page lives under /music/) and the fonts are self-hosted
+   below instead of loaded from Google Fonts, so the page makes no request
+   outside this site. The PAGE LAYOUT block copies the clearance-check layout
+   rules this page uses; the MS-006 block is local. */
+
+@font-face {
+  font-family: 'Patrick Hand';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/patrick-hand-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('fonts/inter-latin.woff2') format('woff2');
+}
+
+/* ── COPIED from real-audio-creator src/index.css ─────────────────────── */
+
+:root {
+  --brand-accent: 10.65 76.47% 56.67%;
+
+  /* Design system tokens */
+  --color-red: #E55A3C;
+  --color-cream: #FFF8E0;
+  --color-black: #1A1A1A;
+  --color-gray-mid: #6B6258;
+  --color-gray-light: #C7C0B5;
+  --color-placeholder: rgba(229, 90, 60, 0.4);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+
+  --font-display: 'Patrick Hand', cursive;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'Sometype Mono', monospace;
+}
+
+html {
+  overflow-x: clip;
+}
+
+body {
+  background-color: var(--color-cream);
+  color: var(--color-black);
+  font-family: var(--font-body);
+  overflow-x: clip;
+}
+
+.surface-sketched {
+  font-family: var(--font-display); /* Patrick Hand */
+  background-color: #FFF8E0;
+  background-image:
+    linear-gradient(rgba(255, 248, 224, 0.75), rgba(255, 248, 224, 0.75)),
+    url('brand-assets/textures/paper-texture-linen.webp');
+  background-repeat: repeat;
+  background-size: 600px;
+}
+
+.text-label {
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+.text-caption {
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 400;
+}
+
+.text-mono {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.box-sketched-light {
+  border-image-source: url('brand-assets/frames/frame-card-light-black.webp');
+  border-image-slice: 100 fill;
+  border-image-repeat: stretch;
+  border-width: 18px;
+  border-style: solid;
+  padding: var(--space-4);
+  background: transparent;
+}
+
+.btn-default,
+.btn-primary-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+  padding: var(--space-3) var(--space-6);
+  background: transparent;
+  cursor: pointer;
+  transition: transform 120ms ease, color 120ms ease, border-image-source 120ms ease, opacity 120ms ease, filter 120ms ease;
+  user-select: none;
+}
+
+.btn-default:focus-visible,
+.btn-primary-cta:focus-visible {
+  outline: 2px solid hsl(var(--brand-accent));
+  outline-offset: 3px;
+}
+
+.btn-default:disabled,
+.btn-primary-cta:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.btn-default {
+  color: var(--color-black);
+  border-image-source: url('brand-assets/frames/frame-button-heavy-black.webp');
+  border-image-slice: 90 fill;
+  border-image-repeat: stretch;
+  border-width: 14px;
+  border-style: solid;
+}
+
+.btn-default:hover {
+  color: var(--color-red);
+  border-image-source: url('brand-assets/frames/frame-button-heavy-red.webp');
+}
+
+.btn-default:active {
+  transform: scale(0.98);
+}
+
+.btn-primary-cta {
+  color: var(--color-red);
+  border-image-source: url('brand-assets/frames/frame-button-heavy-red.webp');
+  border-image-slice: 90 fill;
+  border-image-repeat: stretch;
+  border-width: 14px;
+  border-style: solid;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.btn-primary-cta:hover {
+  transform: scale(1.02);
+  filter: brightness(0.92);
+}
+
+.btn-primary-cta:active {
+  transform: scale(0.98);
+  filter: brightness(0.88);
+}
+
+
+
+
+/* Login form treatment (src/index.css .my-login-modal / .my-login-buttons,
+   used by src/pages/Login.tsx): the site's existing form-in-a-frame. */
+.my-login-modal {
+  border-image-source: url('brand-assets/frames/frame-search-heavy-black.webp') !important;
+  border-image-slice: 140 !important;
+  border-width: 12px !important;
+}
+
+.my-login-modal:hover {
+  border-image-source: url('brand-assets/frames/frame-search-heavy-black.webp') !important;
+  transform: none !important;
+}
+
+.my-login-buttons .btn-primary-cta {
+  border-image-source: url('brand-assets/frames/frame-search-heavy-red.webp') !important;
+  border-image-slice: 210 !important;
+  border-width: 15px !important;
+}
+
+/* SketchDivider (src/components/SketchDivider.tsx) as plain CSS:
+   aspect-[3400/15] bg-left bg-no-repeat bg-[length:105%_100%]. */
+.sketch-divider {
+  aspect-ratio: 3400 / 15;
+  background-image: url('brand-assets/lines/line-thin-black.webp');
+  background-position: left;
+  background-repeat: no-repeat;
+  background-size: 105% 100%;
+}
+
+/* ── PAGE LAYOUT (copied from clearance-check/public/styles.css) ───── */
+
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; }
+h1, h2, h3, p { margin: 0; }
+
+/* Page root: surface-sketched min-h-screen flex flex-col */
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* Navigation: pt-1 px-3 … max-w-[1280px], logo h-8 → sm:h-10 md:h-12 lg:h-14 */
+.nav { width: 100%; padding: 4px 12px 0; }
+.nav-inner { max-width: 1280px; margin: 0 auto; display: flex; align-items: center; }
+.nav-logo { display: block; height: 32px; width: auto; }
+.nav-logo--desktop { display: none; }
+@media (min-width: 640px) {
+  .nav { padding: 6px 16px 0; }
+  .nav-logo--mobile { display: none; }
+  .nav-logo--desktop { display: block; height: 40px; }
+}
+@media (min-width: 768px) { .nav { padding: 8px 24px 0; } .nav-logo--desktop { height: 48px; } }
+@media (min-width: 1024px) { .nav { padding: 12px 40px 0; } .nav-logo--desktop { height: 56px; } }
+/* Line under the logo, as Navigation.tsx: line-medium-black, bleeds past the
+   nav gutter (-mx-3 sm:-mx-4 md:-mx-6 lg:-mx-10), mt-1 → lg:mt-3, -mb-px. */
+.nav-line { display: block; max-width: none; margin: 4px -12px -1px; width: calc(100% + 24px); }
+@media (min-width: 640px) { .nav-line { margin: 6px -16px -1px; width: calc(100% + 32px); } }
+@media (min-width: 768px) { .nav-line { margin: 8px -24px -1px; width: calc(100% + 48px); } }
+@media (min-width: 1024px) { .nav-line { margin: 12px -40px -1px; width: calc(100% + 80px); } }
+
+/* Reading page: max-w-[1084px], gutter px-5 md:px-10; hero pt-8 md:pt-12 pb-10 md:pb-14 */
+.main { flex: 1; width: 100%; }
+.container { max-width: 1084px; margin: 0 auto; padding: 32px 20px 40px; }
+.narrow { max-width: 640px; margin: 0 auto; }
+@media (min-width: 768px) { .container { padding: 48px 40px 56px; } }
+
+/* Headline → subhead mb-8 md:mb-10; lead text-xl md:text-2xl text-black/90 */
+.headline { color: var(--color-red); text-align: center; margin-bottom: 12px; }
+/* Headline image: same width as lead/subheader in .narrow (Reject7). */
+.headline-img { display: block; margin: 0 auto; width: 100%; height: auto; max-width: 100%; }
+
+.lead { font-size: 20px; line-height: 1.625; color: rgba(26, 26, 26, 0.9); text-align: center; margin-bottom: 32px; }
+@media (min-width: 768px) { .lead { font-size: 24px; margin-bottom: 40px; } }
+
+.divider-quiet { width: 100%; opacity: 0.13; }
+
+.stack > * + * { margin-top: 20px; }
+
+/* Form: Login.tsx layout — max-w-md w-full border-solid py-4 px-6 md:px-8,
+   space-y-3, label text-sm font-medium leading-none, CTA w-full in the
+   display font, input pulled out to the frame edge (-mx-[19px] translate-x-[10px]
+   on the row, -ml-[10px] on the input). */
+.check-form { width: 100%; max-width: 448px; margin: 0 auto; border-style: solid; padding: 16px 24px; }
+@media (min-width: 768px) { .check-form { padding: 16px 32px; } }
+.check-form > * + * { margin-top: 12px; }
+.field { margin: 0 -19px; transform: translateX(10px); }
+.field-hint { color: rgba(26, 26, 26, 0.8); margin-top: 2px; }
+.field-error { color: var(--color-red); margin-top: 2px; }
+.field-error:empty { display: none; }
+.my-login-buttons { margin-top: 24px; }
+.btn-block { width: 100%; font-family: var(--font-display); }
+
+/* File picker: native input visually hidden; the brand input frame is the control. */
+.file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
+/* Undo the .field frame pull-out so the button (and the lines under it) line
+   up with the CTA below. Red at rest; hover only expands (no darken). */
+.file-pick, .file-name, .file-hint, .file-error { margin-left: 9px; width: calc(100% - 38px); }
+.file-pick { margin-top: 6px; }
+/* The native input fills the button (invisible), so hovering either the
+   button or the input grows the button; growth is instant, no darken. */
+.file-pick { position: relative; overflow: hidden; }
+.file-pick:hover { transform: scale(1.04); filter: none; transition: none; }
+.file-name, .file-hint, .file-error { text-align: center; }
+.field + .field { margin-top: 20px; }
+.file-pick:has(.file-input:focus-visible) { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; }
+.file-name { font-family: var(--font-mono); font-size: 14px; word-break: break-all; margin-top: 6px; }
+.file-pick:not(.has-file) + .file-name { color: rgba(26, 26, 26, 0.8); }
+/* Selected: button label shifts to FILE UPLOADED; filename brand red + drawn font (Reject8). */
+.file-pick.has-file + .file-name {
+  color: var(--color-red);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+
+/* Reject8: all UI copy uses the same drawn-style font (Patrick Hand / --font-display).
+   Overrides Inter/mono from the COPIED Creator block for this experiment only. */
+.page .btn-default,
+.page .btn-primary-cta,
+.page .file-name,
+.page .file-hint,
+.page .text-mono {
+  font-family: var(--font-display);
+}
+.actions { display: flex; justify-content: center; padding-top: 8px; }
+
+.center { text-align: center; }
+[hidden] { display: none !important; }
+a.btn-default, a.btn-primary-cta { text-decoration: none; }
+/* Reject1: result "upload another track" slightly bigger than the base CTA (16px). */
+.actions .btn-primary-cta { font-size: 20px; padding: var(--space-4) var(--space-8); }
+/* Reject9: result "upload another track" — red at rest + hover; only slight expand */
+.actions .btn-primary-cta:hover {
+  transform: scale(1.04);
+  filter: none;
+}
+.actions .btn-primary-cta:active {
+  transform: scale(0.98);
+  filter: none;
+}
+
+/* ── MS-006 (local) ───────────────────────────────────────────────────── */
+
+.scan-status:empty { display: none; }
+.scan-status { color: var(--color-red); font-size: 16px; }
+.result-lead { margin-bottom: 0; }
+.actions { flex-wrap: wrap; gap: 12px; }
+
+/* Copy line: the text wraps (the link is long on a phone); COPY sits under it. */
+.copy-box { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.copy-line { font-size: 20px; line-height: 1.35; overflow-wrap: anywhere; }
+.copy-line a { color: var(--color-red); }
+.copy-btn { font-size: 18px; min-width: 140px; }
+.copy-btn.is-copied { color: var(--color-black); }
+
+/* Found tracks: start time | title over artist | play. */
+.tracks { list-style: none; margin: 0; padding: 0; }
+.track { display: grid; grid-template-columns: auto 1fr auto; align-items: center; column-gap: 16px; padding: 12px 0; }
+.tracks > .track:first-child { padding-top: 4px; }
+.tracks > .track:last-child { padding-bottom: 4px; }
+.track-time { font-size: 22px; color: var(--color-red); font-variant-numeric: tabular-nums; min-width: 3.2em; }
+.track-text { display: flex; flex-direction: column; min-width: 0; }
+.track-title { font-size: 22px; line-height: 1.2; overflow-wrap: anywhere; }
+.track-artist { font-size: 16px; line-height: 1.3; color: var(--color-gray-mid); overflow-wrap: anywhere; }
+.play-btn { font-size: 16px; padding: 8px 14px; white-space: nowrap; }
+@media (max-width: 420px) {
+  .track { column-gap: 10px; }
+  .track-time { min-width: 0; }
+  .track-time, .track-title { font-size: 20px; }
+  .play-btn { padding: 6px 10px; }
+  .play-word { display: none; }
+}
