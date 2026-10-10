@@ -1,27 +1,39 @@
-// MS-006 browser suite against the REAL moonshots index (phase 2). Run by
-// Builder with the secrets in its own environment:
+// The browser suite against the REAL moonshots index (MS-006 phase 2; MS-007:
+// pending, run only after Spencer's approval and once the MS-007 migration
+// is applied to moonshots). Run by Builder with the secrets in its own
+// environment:
 //
 //   SUPABASE_URL=… SUPABASE_SECRET_KEY=… VIDEOS=/workspace/ms006/videos \
-//   CATALOG=/workspace/ms006/audio-cache OUT=/workspace/ms006/e2e-real \
-//   SELECT=two_tracks,no_music,quiet node test/e2e-real.mjs
+//   CATALOG=/workspace/ms006/audio-cache REF=/workspace/ms007/ref \
+//   OUT=/workspace/ms007/e2e-real SELECT=two_tracks,no_music,quiet \
+//   node --import ./test/cf-register.mjs test/e2e-real.mjs
 //
 //   SUPABASE_URL / SUPABASE_SECRET_KEY  moonshots (kucwpmtkctafzkivuqtu) only;
 //                                       the key is never logged
 //   VIDEOS   make-test-videos output (manifest.json + RA_TEST_ videos)
 //   CATALOG  the index build's audio cache (catalog.json + files)
-//   OUT      results.json, scan-ids.txt, worker-requests.json, shots/
+//   REF      the 8 kHz catalog reference copy (scripts/build-ref-audio.mjs)
+//   OUT      results.json, scan-ids.txt, worker-requests.json, shots/,
+//            uploads/ (the local R2 stand-in; must end empty)
 //   SELECT   manifest kinds to run (two_tracks,no_music,quiet,dev,sweep)
 //   PORT     local port (default: any free port)
 //
-// The Worker (src/worker.js) runs on Node with the real env; every request it
-// makes is logged (method, host, path) and must go to moonshots. Each scan is
-// labelled x-scan-label: RA_TEST_ms006_<file stem> (clear them afterwards
-// with scripts/clear-test-scans.mjs). Play's production audio is answered
+// The Worker (src/worker.js) runs on Node with the real env and local
+// stand-ins for its R2 bucket, queue and Processor container
+// (test/local-cloud.mjs: the real processor code, reading the reference copy
+// from REF); every request the Worker and the processor make is logged
+// (method, host, path) and must go to moonshots. Each scan is labelled
+// x-scan-label: RA_TEST_ms007_<file stem> (clear them afterwards with
+// scripts/clear-test-scans.mjs). Play's production audio is answered
 // from CATALOG (no egress). For each track on the two-track result, exactly
 // one HEAD (no body) goes to its real public stream_url, keyless.
 // Run `npm run build` first (the page is served from dist/).
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, parse } from 'node:path';
+import worker from '../src/worker.js';
+import { moonshots } from '../src/moonshots.js';
+import { localRef } from '../src/ref.js';
+import { localCloud } from './local-cloud.mjs';
 import { serveWorker } from './serve.mjs';
 import { runBrowserSuite } from './browser-suite.mjs';
 import { prodAudioReader } from '../scripts/lib/targets.mjs';
@@ -39,6 +51,7 @@ const SUPABASE_URL = need('SUPABASE_URL');
 const SUPABASE_SECRET_KEY = need('SUPABASE_SECRET_KEY');
 const VIDEOS = need('VIDEOS');
 const CATALOG = need('CATALOG');
+const REF = need('REF');
 const OUT = need('OUT');
 const SELECT = (process.env.SELECT || 'two_tracks,no_music,quiet').split(',').map((s) => s.trim());
 if (new URL(SUPABASE_URL).host !== MOONSHOTS_HOST) {
@@ -66,14 +79,16 @@ globalThis.fetch = (input, init = {}) => {
 const manifest = JSON.parse(await readFile(join(VIDEOS, 'manifest.json'), 'utf8'));
 const videos = withKinds(manifest.videos).filter((v) => SELECT.includes(v.kind));
 const catalog = JSON.parse(await readFile(join(CATALOG, 'catalog.json'), 'utf8')).map((t) => ({ ...t, file: join(CATALOG, t.file) }));
-const labelFor = (file) => `RA_TEST_ms006_${parse(file).name.replace(/^RA_TEST_/, '')}`;
+const labelFor = (file) => `RA_TEST_ms007_${parse(file).name.replace(/^RA_TEST_/, '')}`;
 console.log(`${videos.length} videos (${SELECT.join(', ')}); catalog cache ${catalog.length} tracks`);
 
 let suite = { results: [], playRequests: [] };
 const heads = [];
-const server = await serveWorker({ env: { SUPABASE_URL, SUPABASE_SECRET_KEY } });
+const keys = { SUPABASE_URL, SUPABASE_SECRET_KEY };
+const cloud = await localCloud({ worker, uploadsDir: join(OUT, 'uploads'), makeDeps: () => ({ db: moonshots(keys), ref: localRef(REF) }) });
+const server = await serveWorker({ env: cloud.bindings(keys) });
 try {
-  suite = await runBrowserSuite({ origin: server.origin, videos, videosDir: VIDEOS, catalog, shotsDir: shots, labelFor, check });
+  suite = await runBrowserSuite({ origin: server.origin, videos, videosDir: VIDEOS, catalog, shotsDir: shots, labelFor, check, cloud });
 
   // One keyless HEAD per track on the two-track result: is the real public
   // stream URL there? (No body is read.)

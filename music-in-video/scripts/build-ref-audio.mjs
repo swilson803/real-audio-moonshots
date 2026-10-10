@@ -15,7 +15,9 @@ import { pathToFileURL } from 'node:url';
 import { REFINE } from '../src/refine.js';
 import { refKey } from '../src/ref.js';
 
-function decode(file) {
+// One audio file -> raw 8 kHz mono s16le bytes (also the harness's synthetic
+// catalog reference).
+export function decodeRef(file) {
   return new Promise((resolve, reject) => {
     const ff = spawn('ffmpeg', ['-v', 'error', '-i', file, '-ac', '1', '-ar', String(REFINE.RATE), '-f', 's16le', 'pipe:1']);
     const out = [];
@@ -42,7 +44,7 @@ export async function buildRefAudio({ cacheDir, out, threads = 4, log = console.
       let pcm;
       if (await exists(dest)) pcm = await readFile(dest);
       else {
-        pcm = await decode(join(cacheDir, t.file));
+        pcm = await decodeRef(join(cacheDir, t.file));
         await writeFile(`${dest}.part`, pcm);
         await rename(`${dest}.part`, dest);
       }

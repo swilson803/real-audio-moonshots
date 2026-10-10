@@ -1,12 +1,13 @@
 // A fake moonshots Supabase for local runs: replaces globalThis.fetch with an
 // in-memory index of a synthetic catalog behind the same REST/RPC shapes as
-// the migration. Production public Tracks audio (GET/HEAD) is answered from
-// the local files; the local test server is passed through; any other host
-// throws, so a run using it is offline.
+// the migrations (ms006_scans: test/fake-scans.mjs). Production public Tracks
+// audio (GET/HEAD) is answered from the local files; the local test server is
+// passed through; any other host throws, so a run using it is offline.
 import { readFile, stat } from 'node:fs/promises';
 import { fingerprint } from '../public/music/fp.js';
 import { buildIndex, clustersInMemory, trackWindowInMemory } from '../src/match.js';
 import { decodeToPcm } from '../scripts/build-catalog-index.mjs';
+import { scansTable } from './fake-scans.mjs';
 
 export const MOONSHOTS = 'https://kucwpmtkctafzkivuqtu.supabase.co';
 const PROD_TRACKS_PREFIX = 'https://uprfsmwbsvzuoiyfgtgx.supabase.co/storage/v1/object/public/Tracks/';
@@ -22,7 +23,7 @@ export async function installFakeMoonshots({ catalog }) {
   }
   const index = buildIndex(fps);
   const byTid = new Map(fps.map((f) => [f.tid, f]));
-  const scans = new Map();
+  const table = scansTable();
   const workerRequests = [];
 
   // Cold-start simulation: the next `next` ms006_match calls (or every call,
@@ -68,15 +69,9 @@ export async function installFakeMoonshots({ catalog }) {
       const tids = url.searchParams.get('tid').match(/\d+/g).map(Number);
       return reply(rows.filter((r) => tids.includes(r.tid)));
     }
-    if (path === 'ms006_scans' && method === 'POST') {
-      scans.set(body.id, { ...body, created_at: new Date().toISOString() });
-      return reply(null, 201);
-    }
-    if (path === 'ms006_scans') {
-      const row = scans.get(url.searchParams.get('id').replace('eq.', ''));
-      return reply(row?.found ? [{ id: row.id, created_at: row.created_at, duration_s: row.duration_s, matches: row.matches }] : []);
-    }
+    const scanReply = table.handle(url, method, body);
+    if (scanReply) return scanReply;
     return reply({ message: 'not found' }, 404);
   };
-  return { scans, workerRequests, control };
+  return { scans: table.rows, workerRequests, control };
 }

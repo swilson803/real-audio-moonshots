@@ -1,14 +1,16 @@
-// Offline smoke run of test/e2e-real.mjs: a synthetic catalog cache and
-// synthetic RA_TEST_ videos (made like phase 2's), with the fake moonshots
-// (test/fake-moonshots.mjs) standing in for the real one and blocking any
-// other host. Checks the script itself (env handling, labels, HEAD checks,
-// results.json, scan-ids.txt, the table), not the real index.
-//   node test/e2e-real-smoke.mjs   (after npm run build)
+// Offline smoke run of test/e2e-real.mjs: a synthetic catalog cache, its
+// reference copy and synthetic RA_TEST_ videos (made like phase 2's), with
+// the fake moonshots (test/fake-moonshots.mjs) standing in for the real one
+// and blocking any other host. Checks the script itself (env handling,
+// labels, HEAD checks, results.json, scan-ids.txt, the table), not the real
+// index.
+//   node --import ./test/cf-register.mjs test/e2e-real-smoke.mjs   (after npm run build)
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installFakeMoonshots, MOONSHOTS } from './fake-moonshots.mjs';
 import { makeVideos } from '../scripts/make-test-videos.mjs';
+import { buildRefAudio } from '../scripts/build-ref-audio.mjs';
 import { PROD_TRACKS_PREFIX } from './browser-suite.mjs';
 import { synthMusic, synthSpeech, wavBytes } from './synth.mjs';
 
@@ -32,12 +34,14 @@ for (let i = 0; i < 24; i++) {
 const local = catalog.map((t) => ({ ...t, file: join(cache, t.file) }));
 await makeVideos({ catalog: local, speechFiles: speech, outDir: join(WORK, 'videos'), only: ['two_tracks', 'no_music', 'quiet'], log: () => {} });
 await installFakeMoonshots({ catalog: local });
+await buildRefAudio({ cacheDir: cache, out: join(WORK, 'ref'), log: () => {} });
 
 Object.assign(process.env, {
   SUPABASE_URL: MOONSHOTS,
   SUPABASE_SECRET_KEY: 'sb_secret_fake_for_smoke',
   VIDEOS: join(WORK, 'videos'),
   CATALOG: cache,
+  REF: join(WORK, 'ref'),
   OUT: join(WORK, 'out'),
   SELECT: 'two_tracks,no_music,quiet',
 });
