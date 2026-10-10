@@ -7,6 +7,10 @@ import { ProcessError, processScan } from '../../src/process.js';
 import { atRefineRate } from '../../src/refine.js';
 import { DbBusy } from '../../src/moonshots.js';
 import { createServer, handleProcess } from '../../processor/server.mjs';
+import { demucsSeparator } from '../../src/separate.js';
+import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { bodyOf, syntheticCatalog } from '../fixtures.mjs';
 import { place, slice, synthSpeech } from '../synth.mjs';
 
@@ -27,6 +31,22 @@ test('two tracks under speech: both found, in order, starts from the waveform', 
   assert.equal(out.duration_s, 60);
 });
 
+test('with separation: rows matched on the music stem are added where the soundtrack has none of that track (arm C)', async () => {
+  // The soundtrack: track 2 under speech. The "stem": track 2 again (a
+  // duplicate, dropped) and track 5, which only the stem shows.
+  const audio = place(synthSpeech(17, 60), slice(cat.tracks[1].audio, 5, 25), 3.4, -12);
+  const stem = place(new Float32Array(60 * 16000), slice(cat.tracks[1].audio, 5, 25), 3.4, -12);
+  place(stem, slice(cat.tracks[4].audio, 20, 50), 28.6, -12);
+  const seen = [];
+  const separate = async (samples) => { seen.push(samples.length); return stem; };
+  const out = await processScan(bodyOf(audio), { db, ref, separate });
+  assert.deepEqual(seen, [audio.length], 'separation ran once, on the soundtrack');
+  assert.equal(out.separation, true);
+  assert.deepEqual(out.matches.map((m) => m.title), ['RA_TEST 2', 'RA_TEST 5']);
+  assert.ok(Math.abs(out.matches[0].start_s - 3.4) <= 0.5, 'start from the soundtrack\'s waveform');
+  assert.equal((await processScan(bodyOf(audio), { db, ref })).separation, false);
+});
+
 test('no catalog music finds nothing', async () => {
   const out = await processScan(bodyOf(synthSpeech(12, 40)), { db, ref });
   assert.equal(out.found, false);
@@ -45,6 +65,11 @@ test('the handler: 200 with cost measurements, 422 for permanent errors, 503 bus
   assert.equal(ok.status, 200);
   assert.equal(ok.body.found, false);
   for (const k of ['proc_ms', 'cpu_ms', 'peak_mb']) assert.ok(Number.isInteger(ok.body[k]) && ok.body[k] >= 0, k);
+  // The separation's own CPU and memory (a child process) count too.
+  const separate = Object.assign(async (x) => x, { last: { cpu_ms: 400000, peak_mb: 6000 } });
+  const sep = await handleProcess(bodyOf(synthSpeech(13, 10)), { db, ref, separate });
+  assert.equal(sep.body.separation, true);
+  assert.ok(sep.body.cpu_ms >= 400000 && sep.body.peak_mb === 6000, JSON.stringify(sep.body));
   assert.deepEqual(await handleProcess(new ArrayBuffer(3), { db, ref }), { status: 422, body: { error: 'unreadable' } });
   const busy = { ...db, lookup: async () => { throw new DbBusy('57014'); } };
   const music = place(synthSpeech(14, 30), slice(cat.tracks[0].audio, 0, 20), 2, -12);
@@ -53,8 +78,9 @@ test('the handler: 200 with cost measurements, 422 for permanent errors, 503 bus
   assert.deepEqual(await handleProcess(bodyOf(music), { db: broken, ref }), { status: 500, body: { error: 'internal' } });
 });
 
-test('the container server: POST /process and GET /health', async () => {
-  const server = createServer({ db, ref });
+test('the container server: POST /process and GET /health; fresh dependencies per job', async () => {
+  let made = 0;
+  const server = createServer(() => { made++; return { db, ref }; });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
@@ -62,8 +88,24 @@ test('the container server: POST /process and GET /health', async () => {
     const res = await fetch(`${base}/process`, { method: 'POST', body: bodyOf(synthSpeech(15, 8)) });
     assert.equal(res.status, 200);
     assert.equal((await res.json()).found, false);
+    await fetch(`${base}/process`, { method: 'POST', body: bodyOf(synthSpeech(16, 4)) });
+    assert.equal(made, 2, 'one moonshots client per job: its retry deadline is per client');
     assert.equal((await fetch(`${base}/other`)).status, 404);
   } finally {
     await new Promise((r) => server.close(r));
   }
+});
+
+test('demucsSeparator: the uploaded integers go to the separator exactly; its usage is kept', async () => {
+  // A stand-in "python" that echoes the samples back and reports usage.
+  const dir = await mkdtemp(join(tmpdir(), 'ms007-sep-'));
+  const fake = join(dir, 'python');
+  await writeFile(fake, '#!/bin/sh\ncat\necho \'{"cpu_ms": 1234, "peak_mb": 56}\' >&2\n');
+  await chmod(fake, 0o755);
+  const separate = demucsSeparator({ python: fake });
+  const samples = Float32Array.from([-32768, -1, 0, 1, 12345, 32767], (k) => k / 32768);
+  assert.deepEqual([...await separate(samples)], [...samples]);
+  assert.deepEqual(separate.last, { cpu_ms: 1234, peak_mb: 56 });
+  const failing = demucsSeparator({ python: '/bin/false' });
+  await assert.rejects(failing(samples), /separation failed/);
 });

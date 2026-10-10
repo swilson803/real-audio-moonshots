@@ -16,8 +16,10 @@
 //
 //   --set NAME=VALUE  REFINE override (src/refine.js); practice split only.
 //                     The scored and full runs take the frozen REFINE.
-//   --record DIR      save each clip's database answers, so scripts/measure.mjs
-//                     can replay the clip in a fresh process (cost).
+//   --record DIR      save each clip's database answers (to replay a clip in a
+//                     fresh process for cost measurement).
+//   --separate PYTHON with the music/speech separation (processor/
+//                     separate.py run by this Python, e.g. a venv with demucs)
 // OUT must not exist yet for --split scored|all: those run once.
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -25,6 +27,7 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REFINE } from '../src/refine.js';
 import { localRef } from '../src/ref.js';
+import { demucsSeparator } from '../src/separate.js';
 import { processScan, ProcessError } from '../src/process.js';
 import { loadReplica } from './replica.mjs';
 import { soundtrackBody } from './lib/soundtrack.mjs';
@@ -60,7 +63,7 @@ export function instrumented(db, record) {
 
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.slice(-10).padStart(10, '0');
 
-export async function scoreClips({ clips, db, ref, uploads, refine = REFINE, recordDir = null, log = console.log, process: run = processScan }) {
+export async function scoreClips({ clips, db, ref, uploads, separate = null, refine = REFINE, recordDir = null, log = console.log, process: run = processScan }) {
   const rows = [];
   for (const clip of clips) {
     const key = `uploads/${newId()}`;
@@ -75,14 +78,14 @@ export async function scoreClips({ clips, db, ref, uploads, refine = REFINE, rec
     const w0 = performance.now();
     try {
       const obj = await uploads.get(key);
-      out = await run(await obj.arrayBuffer(), { db: idb, ref, refine });
+      out = await run(await obj.arrayBuffer(), { db: idb, ref, separate, refine });
     } catch (err) {
       if (!(err instanceof ProcessError)) throw err;
       error = err.code;
     } finally {
       await uploads.delete(key);
     }
-    const cpu = cpuMs(process.cpuUsage(c0)) - t.dbCpuMs;
+    const cpu = cpuMs(process.cpuUsage(c0)) - t.dbCpuMs + (separate?.last?.cpu_ms ?? 0);
     const wall = performance.now() - w0;
     if (await uploads.head(key)) throw new Error(`${key} still in the upload bucket after processing`);
     if (recordDir) await writeFile(join(recordDir, `${clip.set}__${clip.file}.json`), JSON.stringify({ clip: { set: clip.set, file: clip.file, dir: clip.dir }, ...record }));
@@ -118,8 +121,9 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const uploads = await r2StandIn(join(out, 'uploads-standin'));
   const logLines = [];
   const log = (s) => { logLines.push(s); console.log(s); };
-  log(`MS-007 ${split} run ${new Date().toISOString()}  HEAD ${head}${dirty ? ' (uncommitted changes)' : ''}  ${clips.length} clips  REFINE ${JSON.stringify(refine)}`);
-  const rows = await scoreClips({ clips, db, ref: localRef(opt('--ref')), uploads, refine, recordDir, log });
+  log(`MS-007 ${split} run ${new Date().toISOString()}  HEAD ${head}${dirty ? ' (uncommitted changes)' : ''}  ${clips.length} clips  separation ${opt('--separate') ? 'on' : 'off'}  REFINE ${JSON.stringify(refine)}`);
+  const separate = opt('--separate') ? demucsSeparator({ python: opt('--separate') }) : null;
+  const rows = await scoreClips({ clips, db, ref: localRef(opt('--ref')), uploads, separate, refine, recordDir, log });
   const summary = summarize(rows);
   log(`summary ${JSON.stringify(summary, null, 1)}`);
   const source = `MS-007 local scored run (scripts/score.mjs, ${split}, HEAD ${head.slice(0, 7)}, ${new Date().toISOString()})`;

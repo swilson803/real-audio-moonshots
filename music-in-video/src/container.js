@@ -1,7 +1,8 @@
 // The Processor container's Durable Object (Cloudflare Containers, MS-007):
 // one instance per name; the JOBS consumer (src/scan.js) spreads jobs over
-// PROCESSOR_INSTANCES of them. The image is processor/Dockerfile; the
-// container sleeps after 60 s without a request. Its environment is set from
+// PROCESSOR_INSTANCES of them. The image is processor/Dockerfile (Node +
+// Python with Demucs; instance standard-4: 4 vCPU, 12 GiB); the container
+// sleeps after 60 s without a request. Its environment is set from
 // the Worker's variables and secrets (names only; values in the dashboard):
 //   SUPABASE_URL, SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY): moonshots
 //   CLOUDFLARE_ACCOUNT_ID, R2_REF_BUCKET: where the reference copy is
