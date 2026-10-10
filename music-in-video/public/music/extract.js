@@ -1,7 +1,8 @@
-// Read a video's soundtrack in the browser and fingerprint it as it decodes.
-// The video never leaves the device: the file is read in slices, its audio is
-// decoded, downmixed, resampled to 16 kHz and fed straight into the
-// fingerprinter, so not even the raw audio is kept.
+// Read a video's soundtrack in the browser, for upload (MS-007). The picture
+// never leaves the device: the file is read in slices, only its audio track
+// is decoded, downmixed and resampled to 16 kHz, and kept as 16-bit samples
+// (public/music/body.js) for POST /api/scan. Processing happens on the
+// server, and the soundtrack is deleted once checked.
 //
 // MP4 / MOV / M4V with AAC: mp4box.js demuxes slice by slice (the moov box is
 // read first wherever it sits, so a moov at the end costs nothing) and
@@ -10,7 +11,8 @@
 // decodeAudioData, under a size cap.
 
 import { createFile, MP4BoxBuffer } from './vendor/mp4box/mp4box.all.mjs';
-import { Fingerprinter, QUERY, Resampler, SAMPLE_RATE } from './fp.js';
+import { Resampler, SAMPLE_RATE } from './fp.js';
+import { PcmCollector } from './body.js';
 
 const MAX_SECONDS = 20 * 60;
 const SLICE = 4 * 1024 * 1024;
@@ -27,8 +29,8 @@ export class ExtractError extends Error {
 
 const isMp4 = (file) => /\.(mp4|mov|m4v)$/i.test(file.name) || /^video\/(mp4|quicktime|x-m4v)$/.test(file.type);
 
-// -> fp.js QUERY fingerprint (peaks, hash-peak flags, hashes) + durationMs
-export async function fingerprintVideo(file, onProgress = () => {}) {
+// -> { parts, bytes, durationMs }: the POST /api/scan body (body.js)
+export async function readSoundtrack(file, onProgress = () => {}) {
   if (isMp4(file) && typeof AudioDecoder !== 'undefined') {
     const viaMp4 = await viaWebCodecs(file, onProgress);
     if (viaMp4) return viaMp4;
@@ -41,10 +43,6 @@ function mono(planes) {
   const out = new Float32Array(planes[0].length);
   for (const p of planes) for (let i = 0; i < out.length; i++) out[i] += p[i] / planes.length;
   return out;
-}
-
-function finish(fp, durationMs) {
-  return { ...fp.finish(), durationMs: Math.round(durationMs) };
 }
 
 // Top-level boxes [{ type, start, size }] from their headers alone.
@@ -108,7 +106,7 @@ async function viaWebCodecs(file, onProgress) {
   };
   if (!(await AudioDecoder.isConfigSupported(config)).supported) return null;
 
-  const fp = new Fingerprinter(QUERY);
+  const pcm = new PcmCollector();
   let resampler = null;
   let decodeError = null;
   decoder = new AudioDecoder({
@@ -121,7 +119,7 @@ async function viaWebCodecs(file, onProgress) {
         planes.push(p);
       }
       data.close();
-      fp.push(resampler.push(mono(planes)));
+      pcm.push(resampler.push(mono(planes)));
     },
     error(e) { decodeError = e; },
   });
@@ -154,7 +152,7 @@ async function viaWebCodecs(file, onProgress) {
   decoder.close();
   if (decodeError) throw new ExtractError('unreadable');
   if (!decoded) throw new ExtractError('no-audio');
-  return finish(fp, durationSec * 1000);
+  return pcm.finish(durationSec * 1000);
 }
 
 async function viaDecodeAudioData(file, onProgress) {
@@ -170,12 +168,12 @@ async function viaDecodeAudioData(file, onProgress) {
   const planes = [];
   for (let c = 0; c < audio.numberOfChannels; c++) planes.push(audio.getChannelData(c));
   const samples = mono(planes);
-  const fp = new Fingerprinter(QUERY);
+  const pcm = new PcmCollector();
   const step = SAMPLE_RATE * 30;
   for (let i = 0; i < samples.length; i += step) {
-    fp.push(samples.subarray(i, i + step));
+    pcm.push(samples.subarray(i, i + step));
     onProgress(Math.min(1, (i + step) / samples.length));
     await new Promise((r) => setTimeout(r)); // let the progress text paint
   }
-  return finish(fp, audio.duration * 1000);
+  return pcm.finish(audio.duration * 1000);
 }

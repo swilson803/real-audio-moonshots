@@ -1,7 +1,7 @@
 /* Music in this video (MS-006) — Real Audio brand "sketched" system.
    The COPIED block is verbatim from clearance-check/public/styles.css (itself
    verbatim from real-audio-creator src/index.css), cut to the rules these
-   pages use (no text inputs, heavy or red boxes, or h1 scale), with two
+   pages use (no text inputs, or heavy or red boxes), with two
    changes: asset URLs
    are relative (this page lives under /music/) and the fonts are self-hosted
    below instead of loaded from Google Fonts, so the page makes no request
@@ -72,6 +72,12 @@ body {
   background-size: 600px;
 }
 
+.text-h1 {
+  font-size: 40px;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
 .text-label {
   font-size: 14px;
   line-height: 1.4;
@@ -88,6 +94,10 @@ body {
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.4;
+}
+
+@media (min-width: 768px) {
+  .text-h1 { font-size: 64px; }
 }
 
 .box-sketched-light {
@@ -235,8 +245,6 @@ h1, h2, h3, p { margin: 0; }
 
 /* Headline → subhead mb-8 md:mb-10; lead text-xl md:text-2xl text-black/90 */
 .headline { color: var(--color-red); text-align: center; margin-bottom: 12px; }
-/* Headline image: same width as lead/subheader in .narrow (Reject7). */
-.headline-img { display: block; margin: 0 auto; width: 100%; height: auto; max-width: 100%; }
 
 .lead { font-size: 20px; line-height: 1.625; color: rgba(26, 26, 26, 0.9); text-align: center; margin-bottom: 32px; }
 @media (min-width: 768px) { .lead { font-size: 24px; margin-bottom: 40px; } }

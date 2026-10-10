@@ -1,0 +1,9 @@
+# Build context for the MS-007 Processor image (music-in-video/processor/
+# Dockerfile): only the files it copies.
+*
+!music-in-video/package.json
+!music-in-video/public/music/fp.js
+!music-in-video/public/music/body.js
+!music-in-video/src
+!music-in-video/processor/server.mjs
+!clearance-check/public/lib.js
