@@ -4,23 +4,81 @@ MS-006: a creator picks a finished video on `/music/`; the page finds the Real
 Audio tracks in it and gives one link, `/v/<id>`, listing every found track in
 order with its start time, title, artist and a stream button, plus a one-tap
 copy of `music in this video: <link>` for the video description. No account.
+MS-007 moves the processing off the Worker into a container behind a queue,
+gets start times from the matched track's waveform, and makes the header
+plain brand type.
 
 Shares the clearance-check Worker and domain (copyrighttester.real.audio):
-`src/worker.js` handles `/music/`, `/v/<id>`, `POST /api/scan` and
-`GET /api/scans/<id>`, and passes every other request, and the cron, to
+`src/worker.js` handles `/music/`, `/v/<id>`, `POST /api/scan`,
+`GET /api/scans/<id>` and `GET /api/scans/<id>/status`, consumes the
+`ms007-jobs` queue (and its dead-letter queue), runs a sweep on the cron, and
+passes every other request, and the cron, to
 `clearance-check/src/worker.js` unchanged. The root `wrangler.jsonc` points
 here; `npm run build` at the root (Wrangler's `build.command`) merges
 `clearance-check/public` and `public/` into `dist/` and fails on any path
 collision.
 
-## The video never leaves the device
+## The picture never leaves the device; the soundtrack is deleted once checked
 `public/music/extract.js` reads the file in slices in the browser (mp4box.js +
 WebCodecs for MP4/MOV/M4V with AAC; decodeAudioData for WebM or without
-WebCodecs), downmixes and resamples to 16 kHz and fingerprints as it decodes.
-Only the fingerprint is POSTed: the verification peaks plus one bit each
-marking the hash peaks (`public/music/body.js`, ~30 KB a minute); the Worker
-rebuilds the hashes from them with the same code. Nothing stores the video
-or its audio; `ms006_scans` keeps only the result.
+WebCodecs), averages the channels and resamples to 16 kHz, and keeps only
+the soundtrack as 16-bit samples (`public/music/body.js`: an `MS7A` header
+plus the samples, ~1.9 MB a minute, 38.4 MB at the 20-minute cap). That is
+the POST /api/scan body; the picture is never sent.
+
+## Processing off the Worker (MS-007)
+- `POST /api/scan` (`src/scan.js`): checks the body, stores it in R2
+  (`UPLOADS`, `uploads/<id>`), inserts the `ms006_scans` row as `queued` and
+  sends `{ id }` to the `JOBS` queue; 202 `{ id }`.
+- The queue consumer (batches of 1, up to 3 at once) marks the row
+  `working` and streams the upload to the Processor container
+  (`src/container.js`, `processor/server.mjs`, `processor/Dockerfile`:
+  `basic`, Node 20, no npm dependencies, no ffmpeg). The container runs
+  `src/process.js`: fingerprint (`fp.js` `QUERY`) -> `src/match.js` through
+  the moonshots RPCs (`src/moonshots.js`, with MS-006's read retries; a
+  fresh client per job) -> start times (`src/refine.js`) -> JSON with
+  `proc_ms` / `cpu_ms` / `peak_mb`. The
+  result is written (`done`, the MS-006 row shape) and the upload deleted.
+- Busy or broken (cold container, database timeouts, a crash): the job is
+  retried with backoff (15 s x attempt, max 60 s; 4 retries), then the
+  dead-letter queue fails it. Permanent errors (`unreadable`, `no-audio`,
+  `too-long`) fail it at once. Every path deletes the upload; the cron sweep
+  fails jobs open > 15 min and deletes uploads > 30 min old with no open job;
+  an R2 lifecycle rule deletes anything left after a day.
+- The upload page polls `/api/scans/<id>/status` with no time limit: "Still
+  working… this can take up to a minute." after 5 s, then the result (or
+  the error line if the job failed). `/v/<id>` answers 202 while the job is
+  open, and the result page shows the same "Still working…" until it's done.
+
+## Music/speech separation (MS-007: tried, dropped)
+Demucs v4 htdemucs (two stems, CPU) on the uploaded soundtrack, the stem
+matched with the same matcher and thresholds. Experiment (offline replica,
+all 83 clips, one pass per arm, arm choice locked on the practice clips):
+original 59 hits / 56 within 1 s; stem only 60 / 57; original + stem 65 /
+61; 0 wrong tracks in each pass. But Demucs shifts its input by a random
+0-0.5 s each run, and the production-path check on the practice clips with
+another draw named a wrong track on a no-music clip (speech + synthetic
+music). The no-wrong-tracks record isn't reproducible, so separation is not
+in the processor. Tooling and results: /workspace/ms007/build/separation.
+
+## Start times (`src/refine.js`, MS-007)
+Tracks are used unedited, so the soundtrack holds a copy of the matched
+track's waveform under the voice. For each row the matcher accepted, at
+8 kHz on first-differenced audio: the lag from PHAT cross-correlation of 30 s
+of the video against the whole track (the matcher can line a row up with a
+repeat of the music, so its own alignment isn't used); per 0.25 s window the
+track's least-squares gain and its standard error (x2); the start is the
+likelihood change point between "no track" and "the track at its median
+strong gain" (strong: gain / SE > 5). Guard rails keep the matcher's start
+without waveform evidence; rows are never added, dropped or renamed, and no
+match threshold is touched. `REFINE` was locked on the 45 practice clips and
+is pinned by `test/unit/refine.test.mjs` (with the confidence threshold).
+The reference is a private copy of the catalog at 8 kHz mono 16-bit
+(`scripts/build-ref-audio.mjs`, 742 MB, built from the index build's local
+audio cache; `src/ref.js` reads it from R2 with a read-only token).
+The 1-second target comes from a vendor test (ACRCloud): 56% right track
+overall, 58% at -20 dB, no wrong tracks across 83 clips, start within 1 s on
+81 of 84 window matches, median error 0.02 s.
 
 ## Matching (`public/music/fp.js`, `src/match.js`)
 Landmark fingerprints: spectral peaks picked per frequency band after a
@@ -37,7 +95,7 @@ running-mean whitening, paired into 24-bit hashes.
 - Stage 1 (Postgres `ms006_match`, one call per ~60 s of video,
   `slicedLookup`): hash hits by track and time offset; candidates from 3
   hits, the 16 strongest.
-- Stage 2 (Worker): single-peak coincidences of the video with each
+- Stage 2 (the processor; MS-006: the Worker): single-peak coincidences of the video with each
   candidate's track at its alignment, against the chance distribution at 24
   off-alignment shifts (z >= 6, ratio >= 2); the audible stretch is where a
   ~4 s window beats chance, its start and end Poisson change points; each
@@ -54,19 +112,25 @@ three dev sets (8/10 on the phase-2 dev set); 17/17 negatives clean
 -12/-16/-20/-24/-28 dB 5/5, 2/5, 4/5, 4/5, 3/5. Misses are quiet clips whose
 first seconds (or all) are inaudible under the voice to peak landmarks.
 
-Cold start (fix 1): the first `ms006_match` after the database has been idle
-can hit PostgREST's 8 s statement timeout (500, code 57014). The Worker
-retries moonshots reads on that and on 502/503/504/520-524/network errors
-(`RETRY` in `src/scan.js`: 3 tries per read, 1 s then 2 s apart, at most 20
-retries and no new try after 40 s per request; the scan row is written once,
-never retried), and answers 503 `{"error":"busy"}` past the cap. The page
-shows "Still working… this can take up to a minute." after 5 s of matching,
-and "The Real Audio catalog is taking too long to answer. Try again in a
-minute." on busy.
+Cold start (MS-006 fix 1, now behind the queue): the first `ms006_match`
+after the database has been idle can hit PostgREST's 8 s statement timeout
+(500, code 57014). The processor retries moonshots reads on that and on
+502/503/504/520-524/network errors (`RETRY` in `src/moonshots.js`: 3 tries
+per read, 1 s then 2 s apart, at most 20 retries and no new try after 40 s
+per job; a fresh client per job) and answers 503 busy past the cap; the
+queue retries the job, and the page keeps showing "Still working…".
 
-Cost per 60 s of video: one `ms006_match` call joining ~75k index rows (max
-~98k), 16 `ms006_track_window` calls, ~110 ms of Worker CPU (Workers Paid;
-over the Free plan's 10 ms).
+Cost (measured 2026-10-09 on the build machine, each job in a fresh Node
+process, database answers replayed; /workspace/ms007/build/measure): the
+processor takes ~1.2 CPU-s per minute of audio; a 5-minute soundtrack 4.86
+CPU-s and 261 MB peak, a 20-minute one 13.5 CPU-s and 535 MB (fits the
+`basic` container: 1/4 vCPU, 1 GiB). With a 5 s boot, ~8 s of database
+waits and the 60 s sleep timeout (estimates), a 5-minute video costs about
+$0.00052 at list prices (container memory, CPU, disk and its Durable
+Object; queue, R2 and request operations ~$0.00002). At 50 or 500 videos a
+month that's all inside Workers Paid's included usage, so $5.00 a month (the
+Workers Paid minimum, which the account already pays); the 742 MB reference
+copy is inside R2's free 10 GB.
 
 ## Supabase: moonshots only
 `supabase/migrations/20261007000000_ms006_track_detection.sql`, applied to
@@ -76,7 +140,26 @@ ms006_track_detection; the repo file keeps its name):
 `ms006_track_window`. RLS on, no policies: anon/authenticated get nothing; the
 Worker uses the moonshots service role from the `SUPABASE_SECRET_KEY` Secret
 already set on it for the clearance cron (`SUPABASE_SERVICE_ROLE_KEY` also
-works; a JWT key for another project is refused). No new Worker secrets.
+works; a JWT key for another project is refused).
+
+`supabase/migrations/20261009000000_ms007_processing.sql` (MS-007, written,
+NOT applied anywhere; Spencer reviews it first; apply as one file, never
+`supabase db push`): `ms006_scans` gains `status` (queued / working / done /
+failed, default done), `attempts`, `updated_at`, `error`, `proc_ms`,
+`cpu_ms`, `peak_mb`, `separation`, a found-only-when-done check and the
+open-jobs index. Tested on PGlite (`test/unit/sql-ms007.test.mjs`).
+
+## Cloudflare (MS-007)
+Bindings: `UPLOADS` (R2 `ms007-uploads`), `JOBS` (queue `ms007-jobs`, dead
+letters to `ms007-jobs-dlq`), `PROCESSOR` (the container, `basic`, up to 3),
+vars `R2_REF_BUCKET` / `CLOUDFLARE_ACCOUNT_ID`, secrets
+`R2_REF_ACCESS_KEY_ID` / `R2_REF_SECRET_ACCESS_KEY` (read-only on
+`ms007-catalog-ref`). They are NOT in the root `wrangler.jsonc` yet: Wrangler
+creates a missing R2 bucket named in config on deploy and on
+`versions upload`, so the bindings wait for the resources, which wait for
+Spencer. The resource runbook and the config patch are in /workspace/ms007
+(cloudflare_runbook.md, build/wrangler-ms007-bindings.patch). Until then
+`POST /api/scan` answers 503 naming the missing bindings.
 
 Size: Supabase Free (500 MB). `ms006_fp` is ~40 rows per second of catalog
 audio at ~74.5 bytes a row with its indexes (measured on PGlite): about
@@ -120,7 +203,16 @@ result page's Play button streaming a track's public `track_ref`.
   `RA_TEST_quiet_*` acceptance, `RA_TEST_dev_quiet_*` dev,
   `RA_TEST_sweep_*` sweep.
 - `scripts/build-assets.mjs`: the asset merge (root `npm run build`).
-- `scripts/make-headline.mjs`: renders the stand-in headline PNG.
+- `scripts/build-ref-audio.mjs` (MS-007): the 8 kHz catalog reference copy
+  plus `manifest.json` (ids, bytes, sha256), from the local audio cache:
+  `--cache-dir /workspace/ms006/audio-cache --out /workspace/ms007/ref`.
+- `scripts/score.mjs` (MS-007): the local scored run. Each clip goes the
+  production way minus the network: soundtrack read like the page
+  (`scripts/lib/soundtrack.mjs`), body to an R2 stand-in, `src/process.js`
+  against the offline replica and the local reference copy, upload deleted
+  and checked gone. CSV in the MS-006 results' columns plus the new start
+  error. `--split practice` takes `--set` REFINE overrides; `--split all` /
+  `scored` take the frozen REFINE and refuse to run twice into one `--out`.
 
 ## Phase 2 (run by Builder; env var names only, values from Builder's env)
 Files live in `/workspace/ms006` (outside the repo). Production is only ever
@@ -176,23 +268,28 @@ the cache.
 
 ## Tests
 - `npm test`: unit tests on synthetic audio made in `test/synth.mjs`
-  (fingerprint, matcher incl. clean / no-match / quiet-bed cases, the migration
-  on PGlite, Worker routes and clearance passthrough, production guards and the
-  index builder). No network.
+  (fingerprint, matcher incl. clean / no-match / quiet-bed cases, start times
+  and the REFINE / threshold lock, the upload body, the processor, the
+  reference readers incl. SigV4 against AWS's example, both migrations on
+  PGlite, the Worker's upload / queue / dead-letter / sweep / status routes
+  and clearance passthrough, production guards and the index builder). No
+  network. Node loads the Worker with `test/cf-register.mjs` (a stub for
+  `cloudflare:workers`, the one Workers-only module).
 - `npm run e2e`: Chrome (`/opt/google/chrome/chrome` or `CHROMIUM`) through
-  the real pages, with synthetic videos from `make-test-videos.mjs` and a fake
-  moonshots behind the Worker (`test/harness.mjs`, `test/fake-moonshots.mjs`);
-  the checks are `test/browser-suite.mjs`, shared with `test/e2e-real.mjs`;
-  screenshots to `SHOTS` (default `/tmp/ms006_shots`).
-- `npm run e2e:real:smoke`: `test/e2e-real.mjs` itself, offline, on synthetic
+  the real pages, with synthetic videos from `make-test-videos.mjs`, a fake
+  moonshots, and local stand-ins for R2, the queue and the container running
+  the real processor (`test/harness.mjs`, `test/local-cloud.mjs`,
+  `test/fake-moonshots.mjs`); the checks are `test/browser-suite.mjs`, shared
+  with `test/e2e-real.mjs`, including the slow paths (cold container plus
+  database timeouts, a crash, a 90 s job, retries used up), the result
+  page's working state and the header (DOM and one-colour pixels).
+  Screenshots to `SHOTS` (default `test/out/shots`); work files under TMPDIR.
+- `npm run e2e:real`: the same against the real moonshots index (needs the
+  MS-007 migration applied and Builder's moonshots key; pending Spencer's
+  approval). `npm run e2e:real:smoke`: that script offline, on synthetic
   media and the fake moonshots (which blocks every other host).
-- Local Worker: `wrangler dev` from the repo root. On Node 20 use wrangler
-  4.86 (the devDependency) with `--compatibility-date 2026-05-03`; its runtime
-  predates the config's 2026-09-01.
 
 ## Not final
-- The headline PNG is a rendered stand-in (Patrick Hand, hatched) for
-  Spencer's hand-drawn art.
 - `src/match.js` defaults and the `QUERY` preset are tuned (round B) on an
   offline replica of the real index with 30 dev videos and 17 negatives;
   the acceptance videos (`RA_TEST_quiet_*`) were never used.

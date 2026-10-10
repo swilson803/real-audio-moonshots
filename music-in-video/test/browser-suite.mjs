@@ -317,8 +317,10 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       const { db, shotsDir: fShots } = faults;
       await mkdir(fShots, { recursive: true });
       const scenarios = [
-        // 4 timeouts: more than one job's read retries (3), so the job goes
-        // back to the queue once.
+        // A 75 s video is two parallel lookups, so the processor's read
+        // retries (3 tries each) absorb these; a database that stays busy
+        // past them (503 -> the queue retries the job) is covered by the unit
+        // tests, a queue retry here by the crash case.
         [375, 'cold container (20 s) and four database statement timeouts', () => { cloud.control.coldStartMs = 20000; db.statementTimeouts({ next: 4, delayMs: 2000 }); }],
         [768, 'the container crashes mid-job once (then an 8 s job)', () => { cloud.control.crashNext = 1; cloud.control.delayMs = 8000; }],
         [1280, 'a 90 s job', () => { cloud.control.delayMs = 90000; }],
