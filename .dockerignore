@@ -6,6 +6,4 @@
 !music-in-video/public/music/body.js
 !music-in-video/src
 !music-in-video/processor/server.mjs
-!music-in-video/processor/separate.py
-!music-in-video/processor/requirements.txt
 !clearance-check/public/lib.js

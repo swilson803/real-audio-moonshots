@@ -1,6 +1,6 @@
 // The Processor container's HTTP server (MS-007), Node 20, port 8080:
 //   POST /process  body: one uploaded soundtrack (public/music/body.js)
-//     200 { found, matches, duration_s, separation, proc_ms, cpu_ms, peak_mb }
+//     200 { found, matches, duration_s, proc_ms, cpu_ms, peak_mb }
 //     422 { error }  never processable: unreadable / no-audio / too-long
 //     503 { error: 'busy' }  moonshots stayed unavailable (the queue retries)
 //     500            anything else (the queue retries)
@@ -12,17 +12,14 @@ import { pathToFileURL } from 'node:url';
 import { DbBusy, moonshots } from '../src/moonshots.js';
 import { ProcessError, processScan } from '../src/process.js';
 import { r2Ref } from '../src/ref.js';
-import { demucsSeparator } from '../src/separate.js';
 
 const cpuMs = (u) => Math.round((u.user + u.system) / 1000);
 
 // The real dependencies, from the container's environment: a fresh moonshots
-// client per job (its retry budget and deadline are per client), and the
-// music/speech separation (Demucs, kept after the MS-007 experiment).
+// client per job (its retry budget and deadline are per client).
 export const depsFromEnv = (env) => () => ({
   db: moonshots(env),
   ref: r2Ref({ endpoint: env.R2_REF_ENDPOINT, bucket: env.R2_REF_BUCKET, accessKeyId: env.R2_REF_ACCESS_KEY_ID, secretAccessKey: env.R2_REF_SECRET_ACCESS_KEY }),
-  separate: demucsSeparator(),
 });
 
 // One job: ArrayBuffer -> { status, body } (also used by the local harness).
@@ -34,11 +31,10 @@ export async function handleProcess(buf, deps) {
     return {
       status: 200,
       body: {
-        found: out.found, matches: out.matches, duration_s: out.duration_s, separation: out.separation,
+        found: out.found, matches: out.matches, duration_s: out.duration_s,
         proc_ms: Math.round(performance.now() - t0),
-        // This process plus the separation's (a child process, when it ran).
-        cpu_ms: cpuMs(process.cpuUsage(c0)) + (deps.separate?.last?.cpu_ms ?? 0),
-        peak_mb: Math.max(Math.round(process.resourceUsage().maxRSS / 1024), deps.separate?.last?.peak_mb ?? 0),
+        cpu_ms: cpuMs(process.cpuUsage(c0)),
+        peak_mb: Math.round(process.resourceUsage().maxRSS / 1024),
       },
     };
   } catch (err) {

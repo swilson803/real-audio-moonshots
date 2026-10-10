@@ -166,7 +166,7 @@ async function runJob(msg, env) {
     const out = await res.json();
     await db.updateScan(id, {
       status: 'done', found: out.found, matches: out.matches, error: null,
-      proc_ms: out.proc_ms, cpu_ms: out.cpu_ms, peak_mb: out.peak_mb, separation: Boolean(out.separation),
+      proc_ms: out.proc_ms, cpu_ms: out.cpu_ms, peak_mb: out.peak_mb, separation: false,
     }, '&status=neq.done');
     await env.UPLOADS.delete(uploadKey(id));
     return msg.ack();

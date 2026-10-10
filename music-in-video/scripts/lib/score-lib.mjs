@@ -1,4 +1,5 @@
-// Shared by scripts/score.mjs and scripts/separation.mjs: the practice /
+// Shared by scripts/score.mjs and the MS-007 separation experiment's arms
+// script (outside the repo, /workspace/ms007/build/separation): the practice /
 // scored split (fixed in the approved MS-007 plan before the build), the
 // per-clip verdict in the MS-006 results CSV's terms, the summary and the CSV.
 import { readFile } from 'node:fs/promises';
