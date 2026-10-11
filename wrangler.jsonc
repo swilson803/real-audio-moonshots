@@ -12,7 +12,13 @@
 // Secrets (set on the Worker in the dashboard, never committed, untouched by
 // deploys): SUPABASE_SECRET_KEY (moonshots service role; the Worker also
 // accepts SUPABASE_SERVICE_ROLE_KEY), RESEND_API_KEY, SITE_URL (required by
-// the results email cron, MS-004), MOONSHOTS_SERVICE_ROLE_KEY.
+// the results email cron, MS-004), MOONSHOTS_SERVICE_ROLE_KEY; MS-007:
+// R2_REF_ACCESS_KEY_ID, R2_REF_SECRET_ACCESS_KEY (read-only R2 API token for
+// the ms007-catalog-ref bucket, passed to the Processor container).
+// MS-007 resources (created by hand first, see the Cloudflare runbook; every
+// name is explicit so no deploy provisions anything): R2 buckets
+// ms007-uploads (UPLOADS) and ms007-catalog-ref (read by the container over
+// the S3 API, no binding), queues ms007-jobs (JOBS) and ms007-jobs-dlq.
 // keep_vars: SUPABASE_URL and SUPABASE_ANON_KEY are also plain-text Variables
 // in the dashboard; keep_vars stops `wrangler deploy` dropping dashboard
 // Variables (no values committed by it). The vars block below sets the same
@@ -33,10 +39,42 @@
     "SUPABASE_URL": "https://kucwpmtkctafzkivuqtu.supabase.co",
     // moonshots anon key: public by design (sent to every browser; RLS guards
     // the data). Never put the service role / secret key here.
-    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1Y3dwbXRrY3RhZnpraXZ1cXR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjA4OTIsImV4cCI6MjEwNTkzNjg5Mn0.47xkt5QDTTuiUqiyxHcoNiDELVayN4kktsB04uFfLXI"
+    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1Y3dwbXRrY3RhZnpraXZ1cXR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNjA4OTIsImV4cCI6MjEwNTkzNjg5Mn0.47xkt5QDTTuiUqiyxHcoNiDELVayN4kktsB04uFfLXI",
+    // MS-007: where the Processor container reads the 8 kHz catalog
+    // reference copy (R2 S3 API endpoint https://<account id>.r2.cloudflarestorage.com).
+    "R2_REF_BUCKET": "ms007-catalog-ref",
+    "CLOUDFLARE_ACCOUNT_ID": "75a9ebb933a296c472a22e453d111a8e"
   },
   "triggers": {
     "crons": ["* * * * *"]
+  },
+  // MS-007: processing runs in a container off the Worker
+  // (music-in-video/processor). basic = 1/4 vCPU, 1 GiB, 4 GB disk; the
+  // image's build context is the repo root (.dockerignore lets in only what
+  // the Dockerfile copies).
+  "containers": [
+    {
+      "name": "ms007-processor",
+      "class_name": "Processor",
+      "image": "./music-in-video/processor/Dockerfile",
+      "image_build_context": ".",
+      "instance_type": "basic",
+      "max_instances": 3
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "PROCESSOR", "class_name": "Processor" }]
+  },
+  "migrations": [{ "tag": "ms007-processor-v1", "new_sqlite_classes": ["Processor"] }],
+  "r2_buckets": [{ "binding": "UPLOADS", "bucket_name": "ms007-uploads" }],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "ms007-jobs" }],
+    // max_concurrency = max_instances; max_retries 4 then ms007-jobs-dlq
+    // (src/scan.js handleJobs / handleDeadLetters).
+    "consumers": [
+      { "queue": "ms007-jobs", "max_batch_size": 1, "max_concurrency": 3, "max_retries": 4, "dead_letter_queue": "ms007-jobs-dlq" },
+      { "queue": "ms007-jobs-dlq", "max_batch_size": 10 }
+    ]
   },
   "observability": { "enabled": true },
   // Required by `wrangler preview`. Vars are not inherited, so the moonshots
