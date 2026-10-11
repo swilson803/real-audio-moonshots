@@ -1,6 +1,6 @@
 // The browser suite against the REAL moonshots index (MS-006 phase 2; MS-007:
-// pending, run only after Spencer's approval and once the MS-007 migration
-// is applied to moonshots). Run by Builder with the secrets in its own
+// the migration is applied to moonshots as 20261011213929; run only with
+// Spencer's go-ahead). Run by Builder with the secrets in its own
 // environment:
 //
 //   SUPABASE_URL=… SUPABASE_SECRET_KEY=… VIDEOS=/workspace/ms006/videos \

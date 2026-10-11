@@ -1,6 +1,6 @@
 // The MS-007 migration on top of MS-006's, applied to an in-process Postgres
-// (PGlite, WASM; no server, no network). Never applied anywhere else by this
-// branch.
+// (PGlite, WASM; no server, no network). On moonshots it was applied through
+// the connector (version 20261011213929), not by this test or branch code.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -10,7 +10,7 @@ const dir = new URL('../../supabase/migrations/', import.meta.url);
 const db = new PGlite();
 await db.exec('create role anon; create role authenticated; create role service_role;');
 await db.exec(await readFile(new URL('20261008192425_ms006_track_detection.sql', dir), 'utf8'));
-await db.exec(await readFile(new URL('20261009000000_ms007_processing.sql', dir), 'utf8'));
+await db.exec(await readFile(new URL('20261011213929_ms007_processing.sql', dir), 'utf8'));
 
 const insert = (cols) => {
   const keys = Object.keys(cols);

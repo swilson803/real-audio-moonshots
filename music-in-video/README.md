@@ -151,9 +151,12 @@ Worker uses the moonshots service role from the `SUPABASE_SECRET_KEY` Secret
 already set on it for the clearance cron (`SUPABASE_SERVICE_ROLE_KEY` also
 works; a JWT key for another project is refused).
 
-`supabase/migrations/20261009000000_ms007_processing.sql` (MS-007, written,
-NOT applied anywhere; Spencer reviews it first; apply as one file, never
-`supabase db push`): `ms006_scans` gains `status` (queued / working / done /
+`supabase/migrations/20261011213929_ms007_processing.sql` (MS-007): applied
+to moonshots on Oct 11 2026 as version 20261011213929 (ms007_processing)
+through the connector's apply_migration, with Spencer's approval; the file
+was written as 20261009000000 and renamed to the recorded version, content
+unchanged (its own header still says NOT APPLIED: that text is part of the
+recorded statements). `ms006_scans` gains `status` (queued / working / done /
 failed, default done), `attempts`, `updated_at`, `error`, `proc_ms`,
 `cpu_ms`, `peak_mb`, `separation`, a found-only-when-done check and the
 open-jobs index. Tested on PGlite (`test/unit/sql-ms007.test.mjs`).
@@ -163,12 +166,12 @@ Bindings: `UPLOADS` (R2 `ms007-uploads`), `JOBS` (queue `ms007-jobs`, dead
 letters to `ms007-jobs-dlq`), `PROCESSOR` (the container, `basic`, up to 3),
 vars `R2_REF_BUCKET` / `CLOUDFLARE_ACCOUNT_ID`, secrets
 `R2_REF_ACCESS_KEY_ID` / `R2_REF_SECRET_ACCESS_KEY` (read-only on
-`ms007-catalog-ref`). They are NOT in the root `wrangler.jsonc` yet: Wrangler
-creates a missing R2 bucket named in config on deploy and on
-`versions upload`, so the bindings wait for the resources, which wait for
-Spencer. The resource runbook and the config patch are in /workspace/ms007
-(cloudflare_runbook.md, build/wrangler-ms007-bindings.patch). Until then
-`POST /api/scan` answers 503 naming the missing bindings.
+`ms007-catalog-ref`). They are in the root `wrangler.jsonc` (Oct 11 2026),
+after Builder created the buckets, the lifecycle rule and the queues by hand;
+every name is explicit, so a deploy provisions nothing (Wrangler creates a
+missing R2 bucket named in config on deploy and on `versions upload`). The
+resource runbook is in /workspace/ms007 (cloudflare_runbook.md). Without the
+bindings `POST /api/scan` answers 503 naming the missing ones.
 
 Size: Supabase Free (500 MB). `ms006_fp` is ~40 rows per second of catalog
 audio at ~74.5 bytes a row with its indexes (measured on PGlite): about
@@ -293,9 +296,8 @@ the cache.
   database timeouts, a crash, a 90 s job, retries used up), the result
   page's working state and the header (DOM and one-colour pixels).
   Screenshots to `SHOTS` (default `test/out/shots`); work files under TMPDIR.
-- `npm run e2e:real`: the same against the real moonshots index (needs the
-  MS-007 migration applied and Builder's moonshots key; pending Spencer's
-  approval). `npm run e2e:real:smoke`: that script offline, on synthetic
+- `npm run e2e:real`: the same against the real moonshots index (needs
+  Builder's moonshots key; the MS-007 migration is applied; not run yet). `npm run e2e:real:smoke`: that script offline, on synthetic
   media and the fake moonshots (which blocks every other host).
 
 ## Not final
