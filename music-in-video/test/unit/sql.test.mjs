@@ -9,7 +9,7 @@ import { fingerprint } from '../../public/music/fp.js';
 import { buildIndex, clustersInMemory, trackWindowInMemory } from '../../src/match.js';
 import { place, silence, slice, synthMusic, synthSpeech } from '../synth.mjs';
 
-const MIGRATION = new URL('../../supabase/migrations/20261007000000_ms006_track_detection.sql', import.meta.url);
+const MIGRATION = new URL('../../supabase/migrations/20261008192425_ms006_track_detection.sql', import.meta.url);
 const STREAM = 'https://uprfsmwbsvzuoiyfgtgx.supabase.co/storage/v1/object/public/Tracks/tracks/x/';
 
 const db = new PGlite();

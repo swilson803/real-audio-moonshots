@@ -9,7 +9,7 @@ import { PGlite } from '@electric-sql/pglite';
 const dir = new URL('../../supabase/migrations/', import.meta.url);
 const db = new PGlite();
 await db.exec('create role anon; create role authenticated; create role service_role;');
-await db.exec(await readFile(new URL('20261007000000_ms006_track_detection.sql', dir), 'utf8'));
+await db.exec(await readFile(new URL('20261008192425_ms006_track_detection.sql', dir), 'utf8'));
 await db.exec(await readFile(new URL('20261009000000_ms007_processing.sql', dir), 'utf8'));
 
 const insert = (cols) => {

@@ -44,7 +44,7 @@ test('threshold lock: the confidence threshold is MS-006\'s, unchanged', async (
   assert.match(match, /^const MAX_CLUSTERS = 500;/m);
   // The applied MS-006 migration (ms006_match: bins of 4, >= 2 hits, 500 rows),
   // byte for byte: md5 d902c56f… as applied to moonshots on 2026-10-08.
-  const sql = await read('../../supabase/migrations/20261007000000_ms006_track_detection.sql');
+  const sql = await read('../../supabase/migrations/20261008192425_ms006_track_detection.sql');
   assert.equal(createHash('md5').update(sql).digest('hex'), 'd902c56f0163acf9346f497a83b0dc13');
 });
 

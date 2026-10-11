@@ -133,9 +133,18 @@ Workers Paid minimum, which the account already pays); the 742 MB reference
 copy is inside R2's free 10 GB.
 
 ## Supabase: moonshots only
-`supabase/migrations/20261007000000_ms006_track_detection.sql`, applied to
-moonshots only on 2026-10-08 (recorded there as version 20261008192425,
-ms006_track_detection; the repo file keeps its name):
+`supabase/migrations/` is the one folder for every migration recorded on the
+moonshots project, each named `<recorded version>_<recorded name>.sql` with
+exactly the recorded statements (the repo was fixed to match the database,
+Oct 10 2026; the database's history was not rewritten):
+- `20260926233155_ms001_clearance_queue`, `20260927000016_ms001_anon_insert_grant`,
+  `20260927024850_ms001_emailed_at`: MS-001 (clearance-check), moved here
+  from `clearance-check/supabase/migrations`.
+- `20260927000050_ms001_cleanup_probe_rows`,
+  `20260927024904_ms001_cleanup_approved_keep_none`: historical, data-only,
+  already applied; never re-run (a header comment says so).
+- `20261008192425_ms006_track_detection` (was `20261007000000_…`, same
+  content), applied to moonshots only on 2026-10-08:
 `ms006_catalog`, `ms006_fp`, `ms006_scans`, RPCs `ms006_match` and
 `ms006_track_window`. RLS on, no policies: anon/authenticated get nothing; the
 Worker uses the moonshots service role from the `SUPABASE_SECRET_KEY` Secret

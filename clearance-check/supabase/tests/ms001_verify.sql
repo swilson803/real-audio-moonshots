@@ -1,4 +1,5 @@
--- MS-001 verification. Run against the moonshots project AFTER the migration is
+-- MS-001 verification. Run against the moonshots project AFTER the MS-001
+-- migrations (music-in-video/supabase/migrations/2026092*_ms001_*.sql) are
 -- applied (psql or Supabase CLI as postgres; not the dashboard). Everything runs in one transaction
 -- and is rolled back, so no test rows are left behind. Any failure raises.
 -- Safe with existing data (e.g. KEEP row 96e844a2-d144-453d-be5b-278088849e1d
