@@ -5,6 +5,7 @@
 import { ExtractError, readSoundtrack } from './extract.js';
 import { mountCredit } from './credit.js';
 import { renderTracks } from './tracks.js';
+import { DEMO_ID, DEMO_MATCHES, demoAudioUrl, demoState } from './demo.js';
 
 const $ = (id) => document.getElementById(id);
 const form = $('scan-form');
@@ -144,3 +145,18 @@ form.addEventListener('submit', async (e) => {
     if (form.hidden) fileInput.value = '';
   }
 });
+
+// Preview-only demo (demo.js): ?demo=found / ?demo=none on an allowed host
+// shows a fixture result straight away, with no /api/ request. Anywhere
+// else (production) ?demo is ignored and the page is the normal flow.
+const demo = demoState(location);
+if (demo) {
+  const note = document.createElement('p');
+  note.id = 'demo-note';
+  note.className = 'text-label center';
+  note.textContent = 'Demo preview: fixture results, not a real scan.';
+  const audio = demoAudioUrl();
+  const matches = DEMO_MATCHES.map((m) => ({ ...m, stream_url: audio }));
+  showResult({ found: demo === 'found', id: DEMO_ID, matches });
+  $(demo).prepend(note);
+}

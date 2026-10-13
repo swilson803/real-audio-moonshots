@@ -11,6 +11,8 @@
 //    credit block (per-platform tabs, text, copy: one tap on phones), the
 //    found tracks under it, "check another video", and the /v/ page (rows,
 //    Play, its copy line);
+//  - the preview-only demo mode (?demo=found / none) shows fixtures with no
+//    /api/ request on allowed hosts and is ignored on the production hosts;
 //  - the header on both pages is plain brand type (DOM + one-colour pixels);
 //  - with `faults` (the synthetic harness): slow paths behind the queue
 //    (cold container + database timeouts, a crash mid-job, a 90 s job, retries
@@ -59,6 +61,7 @@ async function durationOf(file) {
  * @param videosDir  where the files are
  * @param catalog    [{ track_id, stream_url, file }] local audio for Play
  * @param shotsDir   screenshots
+ * @param demoShotsDir  the demo-mode screenshots (default shotsDir)
  * @param labelFor   optional (file) => x-scan-label for its POST /api/scan
  * @param check      (name, ok, detail) => void
  * @param cloud      optional test/local-cloud.mjs instance: uploads left,
@@ -67,10 +70,13 @@ async function durationOf(file) {
  *                   (test/fake-moonshots.mjs) for the slow-path checks (needs
  *                   cloud)
  */
-export async function runBrowserSuite({ origin, videos, videosDir, catalog, shotsDir, labelFor = null, check, cloud = null, faults = null }) {
+export async function runBrowserSuite({ origin, videos, videosDir, catalog, shotsDir, demoShotsDir = shotsDir, labelFor = null, check, cloud = null, faults = null }) {
   const { chromium } = require('playwright');
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/opt/google/chrome/chrome' });
   const browserRequests = [];
+  // Other hostnames the demo checks serve this local build under (2a);
+  // answered by Playwright, never sent to the network.
+  const servedLocally = new Set();
   const playRequests = [];
   const results = [];
   let label = null;
@@ -486,6 +492,130 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
     check('unknown result link says so', (await p404.textContent('#summary')).includes('couldn’t find'));
     await p404.context().close();
 
+    // 2a. Preview-only demo mode (public/music/demo.js): ?demo=found and
+    // ?demo=none show fixtures with no /api/ request on allowed hosts (this
+    // local origin, a preview URL) and are ignored on the production hosts,
+    // where the normal flow runs. Other hosts are this local build served
+    // under that name by Playwright (no network, no DNS).
+    {
+      const { DEMO_ID, DEMO_MATCHES } = await import('../public/music/demo.js');
+      await mkdir(demoShotsDir, { recursive: true });
+      const asHost = (page, host) => servedLocally.add(host) && page.context().route(`https://${host}/**`, async (route) => {
+        const u = new URL(route.request().url());
+        await route.fulfill({ response: await route.fetch({ url: `${origin}${u.pathname}${u.search}` }) });
+      });
+      const apiCalls = (page) => {
+        const calls = [];
+        page.on('request', (r) => { if (new URL(r.url()).pathname.startsWith('/api/')) calls.push(`${r.method()} ${r.url()}`); });
+        return calls;
+      };
+      const shown = (page) => page.evaluate(() => ({
+        form: !document.getElementById('scan-form').hidden,
+        found: !document.getElementById('found').hidden,
+        none: !document.getElementById('none').hidden,
+        note: document.getElementById('demo-note')?.textContent ?? null,
+      }));
+      const NOTE = 'Demo preview: fixture results, not a real scan.';
+      for (const width of [281, 375, 1280]) {
+        const mobile = width <= 375;
+        for (const state of ['found', 'none']) {
+          const p = await newPage({ width, height: mobile ? 812 : 1000 }, mobile ? { hasTouch: true, isMobile: true } : {});
+          const calls = apiCalls(p);
+          await p.goto(`${origin}/music/?demo=${state}`);
+          await p.waitForSelector(`#${state}:not([hidden])`, { timeout: 10000 }).catch(() => {});
+          await p.evaluate(() => document.fonts.ready);
+          await p.waitForTimeout(1000); // room for any late request
+          const s = await shown(p);
+          check(`demo=${state} renders the fixture result at ${width}`,
+            !s.form && s.found === (state === 'found') && s.none === (state === 'none') && s.note === NOTE, JSON.stringify(s));
+          if (state === 'found') {
+            const got = await p.evaluate(() => ({
+              summary: document.getElementById('found-summary').textContent,
+              id: document.getElementById('found').dataset.scanId,
+              credit: document.querySelector('#credit .accred-text').textContent,
+              rows: [...document.querySelectorAll('#found-tracks .track')].map((el) => `${el.querySelector('.track-time').textContent} ${el.querySelector('.track-title').textContent} / ${el.querySelector('.track-artist').textContent}`),
+            }));
+            const want = {
+              summary: 'We found 2 Real Audio tracks in your video.',
+              id: DEMO_ID,
+              credit: creditText(TABS[0], DEMO_MATCHES, `${new URL(origin).host}/v/${DEMO_ID}`),
+              rows: ['0:04 Demo Track One (fixture) / Demo Artist (not real)', '0:40 Demo Track Two (fixture) / Another Demo Artist (not real)'],
+            };
+            check(`demo=found shows the fixture tracks and credit at ${width}`, JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got));
+            if (width === 1280) {
+              await p.click('#credit-tab-tiktok');
+              await p.click('#credit .download-accred');
+              check('demo=found credit copies', (await p.evaluate(() => navigator.clipboard.readText())) === creditText(TABS[1], DEMO_MATCHES, ''));
+              const k = await p.evaluate(() => window.__audios.length);
+              await p.click('#found-tracks .play-btn');
+              await p.waitForFunction((i) => window.__audios[i] && window.__audios[i].currentTime > 0.2, k, { timeout: 10000 }).catch(() => {});
+              const a = await p.evaluate((i) => ({ src: window.__audios[i]?.src ?? '', t: window.__audios[i]?.currentTime ?? 0 }), k);
+              check('demo=found Play uses the local silent clip', a.src.startsWith('blob:') && a.t > 0.2, JSON.stringify(a));
+              await p.mouse.move(0, 0);
+              await p.waitForTimeout(2300);
+            }
+          }
+          check(`demo=${state} fits ${width}`, await noOverflow(p));
+          await p.screenshot({ path: `${demoShotsDir}/demo-${state}-${width}.png`, fullPage: true });
+          check(`demo=${state} makes no /api/ request at ${width}`, calls.length === 0, calls.join(', '));
+          await p.context().close();
+        }
+      }
+
+      // Not a demo value: the normal page.
+      {
+        const p = await newPage({ width: 1280, height: 1000 });
+        const calls = apiCalls(p);
+        await p.goto(`${origin}/music/?demo=error`);
+        await p.waitForTimeout(1000);
+        const s = await shown(p);
+        check('?demo=<anything else> is the normal page', s.form && !s.found && !s.none && s.note === null && calls.length === 0, JSON.stringify(s));
+        await p.context().close();
+      }
+
+      // A preview URL runs the demo.
+      {
+        const host = 'claude-ms-007-r1-credit-flow-real-audio-moonshots.spencerrwilson.workers.dev';
+        const p = await newPage({ width: 1280, height: 1000 });
+        await asHost(p, host);
+        const calls = apiCalls(p);
+        await p.goto(`https://${host}/music/?demo=found`);
+        await p.waitForSelector('#found:not([hidden])', { timeout: 10000 }).catch(() => {});
+        await p.waitForTimeout(1000);
+        const s = await shown(p);
+        const credit = await p.$eval('#credit .accred-text', (el) => el.textContent).catch(() => null);
+        check('demo runs on a preview URL', !s.form && s.found && s.note === NOTE && credit === creditText(TABS[0], DEMO_MATCHES, `${host}/v/${DEMO_ID}`) && calls.length === 0, JSON.stringify({ s, credit, calls }));
+        await p.context().close();
+      }
+
+      // Production hosts: ?demo is ignored, nothing fake shows, and the
+      // normal flow still runs (a real upload through the local Worker).
+      for (const host of ['copyrighttester.real.audio', 'real-audio-moonshots.spencerrwilson.workers.dev']) {
+        for (const state of ['found', 'none']) {
+          const p = await newPage({ width: 1280, height: 1000 });
+          await asHost(p, host);
+          const calls = apiCalls(p);
+          await p.goto(`https://${host}/music/?demo=${state}`);
+          await p.evaluate(() => document.fonts.ready);
+          await p.waitForTimeout(1000);
+          const s = await shown(p);
+          const fake = await p.evaluate(() => /fixture|not real|DEMO000000|Demo preview/.test(document.body.innerText));
+          check(`demo=${state} is ignored on ${host}`, s.form && !s.found && !s.none && s.note === null && !fake && calls.length === 0, JSON.stringify({ s, fake, calls }));
+          if (state === 'found' && two) {
+            await p.setInputFiles('#file', join(videosDir, two.file));
+            await p.click('#submit');
+            await p.waitForFunction(() => !document.getElementById('found').hidden || !document.getElementById('none').hidden || document.getElementById('form-error').textContent, null, { timeout: 300000 });
+            const id = await p.getAttribute('#found', 'data-scan-id');
+            const titles = await p.$$eval('#found-tracks .track-title', (els) => els.map((el) => el.textContent));
+            check(`the normal flow runs on ${host} with ?demo=found`,
+              /^[0-9A-Za-z]{10}$/.test(id || '') && id !== DEMO_ID && calls.some((c) => c.startsWith('POST ') && c.endsWith('/api/scan'))
+              && titles.join('|') === two.expect.map((e) => e.title).join('|'), JSON.stringify({ id, titles, calls: calls.length }));
+          }
+          await p.context().close();
+        }
+      }
+    }
+
     // 2b. Slow paths behind the queue (synthetic harness): the page shows
     // "Still working…", never an error or a timeout, then the right result;
     // one scan row; the upload deleted.
@@ -581,10 +711,11 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       }
     }
 
-    // 3. Browser requests: this site, or production Tracks GETs (routed locally).
+    // 3. Browser requests: this site (also when served under another name by
+    // the demo checks), or production Tracks GETs (routed locally).
     const bad = browserRequests.filter(({ method, url }) => {
       const u = new URL(url);
-      if (u.origin === origin) return false;
+      if (u.origin === origin || (u.protocol === 'https:' && servedLocally.has(u.host))) return false;
       return !(u.host === PROD_HOST && method === 'GET' && url.startsWith(PROD_TRACKS_PREFIX));
     });
     const hosts = [...new Set(browserRequests.map((r) => new URL(r.url).host))];

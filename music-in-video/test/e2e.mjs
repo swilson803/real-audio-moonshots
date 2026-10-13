@@ -11,7 +11,8 @@
 //  - Play's production audio requests are answered locally, so nothing
 //    reaches any Supabase project or Cloudflare.
 // Screenshots go to SHOTS (default test/out/shots); the slow-path ones to
-// FAULT_SHOTS. Work files go under TMPDIR.
+// FAULT_SHOTS, the demo-mode ones to DEMO_SHOTS (default SHOTS). Work files
+// go under TMPDIR.
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,7 +52,7 @@ const videos = await makeVideos({ catalog, speechFiles, outDir: join(WORK, 'vide
 const server = await start({ catalog, workDir: WORK });
 try {
   await runBrowserSuite({
-    origin: server.origin, videos, videosDir: join(WORK, 'videos'), catalog, shotsDir: SHOTS, check,
+    origin: server.origin, videos, videosDir: join(WORK, 'videos'), catalog, shotsDir: SHOTS, demoShotsDir: process.env.DEMO_SHOTS || SHOTS, check,
     cloud: server.cloud, faults: { db: server.fake, shotsDir: FAULT_SHOTS },
   });
   const workerHosts = [...new Set(server.workerRequests.map((r) => r.split(' ')[1].split('/')[0]))];
