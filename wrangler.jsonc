@@ -6,8 +6,10 @@
 // Assets are both experiments' public/ folders merged into
 // music-in-video/dist by `npm run build` (root package.json), which Wrangler
 // runs before every deploy (build.command below).
-// name, crons, vars and previews are unchanged from the clearance-check-only
-// config, so the Worker, its domain, its secrets and its cron stay the same.
+// name: "real-audio-moonshots", the live Worker Workers Builds deploys to
+// (custom domain copyrighttester.real.audio is on it). crons, vars and
+// previews are unchanged from the clearance-check-only config, so its
+// domain, its secrets and its cron stay the same.
 //
 // Secrets (set on the Worker in the dashboard, never committed, untouched by
 // deploys): SUPABASE_SECRET_KEY (moonshots service role; the Worker also
@@ -24,7 +26,7 @@
 // Variables (no values committed by it). The vars block below sets the same
 // two, to the moonshots values.
 {
-  "name": "clearance-check",
+  "name": "real-audio-moonshots",
   "main": "music-in-video/src/worker.js",
   "compatibility_date": "2026-09-01",
   "keep_vars": true,

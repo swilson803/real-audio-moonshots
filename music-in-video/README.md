@@ -8,7 +8,8 @@ MS-007 moves the processing off the Worker into a container behind a queue,
 gets start times from the matched track's waveform, and makes the header
 plain brand type.
 
-Shares the clearance-check Worker and domain (copyrighttester.real.audio):
+Shares one Worker, `real-audio-moonshots`, and its domain
+(copyrighttester.real.audio) with the clearance check:
 `src/worker.js` handles `/music/`, `/v/<id>`, `POST /api/scan`,
 `GET /api/scans/<id>` and `GET /api/scans/<id>/status`, consumes the
 `ms007-jobs` queue (and its dead-letter queue), runs a sweep on the cron, and
