@@ -12,8 +12,8 @@ revoke all on table public.submissions from anon, authenticated;
 grant insert, select on table public.submissions to anon, authenticated;
 
 -- 2. Insert policy. With a table-level INSERT grant anon could otherwise pre-set
---    the results, so a new row must be queued with every result pending and no
---    notes (tighter than before, not looser).
+-- the results, so a new row must be queued with every result pending and no
+-- notes (tighter than before, not looser).
 drop policy "submissions_insert_anyone" on public.submissions;
 create policy "submissions_insert_anyone"
   on public.submissions
@@ -21,14 +21,15 @@ create policy "submissions_insert_anyone"
   to anon, authenticated
   with check (
     status = 'queued'
-    and youtube_result = 'pending'   and youtube_note is null
-    and tiktok_result = 'pending'    and tiktok_note is null
+    and youtube_result = 'pending' and youtube_note is null
+    and tiktok_result = 'pending' and tiktok_note is null
     and instagram_result = 'pending' and instagram_note is null
   );
 
 -- 3. A normal body is storage_path + email only, so original_filename can't be
---    required. When omitted it is filled from the last segment of storage_path.
-alter table public.submissions alter column original_filename drop not null;
+-- required. When omitted it is filled from the last segment of storage_path.
+alter table public.submissions
+  alter column original_filename drop not null;
 
 create function public.submissions_fill_original_filename()
 returns trigger
@@ -48,8 +49,8 @@ create trigger submissions_fill_original_filename
   for each row execute function public.submissions_fill_original_filename();
 
 -- 4. Read by id: same rule as before. request.headers can be '' (not NULL)
---    once a transaction-local setting has ended on a pooled connection, and
---    ''::json raises; nullif turns that into "no header" -> no rows.
+-- once a transaction-local setting has ended on a pooled connection, and
+-- ''::json raises; nullif turns that into "no header" -> no rows.
 drop policy "submissions_select_by_id" on public.submissions;
 create policy "submissions_select_by_id"
   on public.submissions

@@ -1,12 +1,13 @@
-// Fix 1: the Worker's retries of moonshots reads on a cold database
-// (PostgREST statement timeout, 57014). fetch is replaced; no network.
+// MS-006 fix 1, carried into MS-007: retries of moonshots reads on a cold
+// database (PostgREST statement timeout, 57014), now in the processor; past
+// the cap the processor answers busy and the queue retries the job.
+// fetch is replaced; no network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker from '../../src/worker.js';
-import { DbBusy, RETRY, isTransient, moonshots } from '../../src/scan.js';
-import { QUERY, fingerprint } from '../../public/music/fp.js';
-import { encodeScanBody } from '../../public/music/body.js';
-import { syntheticCatalog } from '../fixtures.mjs';
+import { DbBusy, RETRY, isTransient, moonshots } from '../../src/moonshots.js';
+import { atRefineRate } from '../../src/refine.js';
+import { handleProcess } from '../../processor/server.mjs';
+import { bodyOf, syntheticCatalog } from '../fixtures.mjs';
 import { place, slice, synthSpeech } from '../synth.mjs';
 
 const MOONSHOTS = 'https://kucwpmtkctafzkivuqtu.supabase.co';
@@ -86,9 +87,10 @@ test('the cap: a request-wide retry budget and a deadline', async () => {
   assert.equal(calls.length, 2, 'tries start at 0 s and 9 s; a third would start at 19 s, past the 18 s deadline');
 });
 
-// Through the Worker: a real scan body, a fake moonshots behind fetch.
+// Through the processor: a real upload body, a fake moonshots behind fetch.
 const cat = syntheticCatalog(6, 60);
 const rows = cat.tracks.map((t) => ({ tid: t.tid, track_id: `00000000-0000-4000-8000-00000000000${t.tid}`, title: `RA_TEST ${t.tid}`, artist: 'RA_TEST', stream_url: 'x' }));
+const ref = { track: async (trackId) => atRefineRate(cat.tracks[Number(trackId.slice(-1)) - 1].audio) };
 function fakeMoonshots({ timeouts }) {
   const log = [];
   globalThis.fetch = async (url, init = {}) => {
@@ -102,30 +104,25 @@ function fakeMoonshots({ timeouts }) {
     }
     if (path === 'rpc/ms006_track_window') return reply([await cat.deps.trackWindow(body.p_tid, body.p_from, body.p_to)]);
     if (path === 'ms006_catalog') return reply(rows.filter((r) => u.searchParams.get('tid').includes(String(r.tid))));
-    if (path === 'ms006_scans' && init.method === 'POST') return new Response(null, { status: 201 });
     return reply([], 404);
   };
   return log;
 }
-const video = place(synthSpeech(5, 40), slice(cat.tracks[1].audio, 5, 30), 3, -12);
-const scanRequest = () => new Request('https://copyrighttester.real.audio/api/scan', { method: 'POST', body: encodeScanBody({ ...fingerprint(video, QUERY), durationMs: 40000 }) });
+const upload = bodyOf(place(synthSpeech(5, 40), slice(cat.tracks[1].audio, 5, 30), 3, -12));
+// Real moonshots client with fake time, so the back-offs don't take seconds.
+const deps = () => ({ db: moonshots(env, fakeTime()), ref });
 
-test('Worker: a cold first lookup is retried; one result, one scan row', async () => {
+test('processor: a cold first lookup is retried; one result', async () => {
   const log = fakeMoonshots({ timeouts: { left: 1 } });
-  const res = await worker.fetch(scanRequest(), env, { waitUntil() {} });
-  assert.equal(res.status, 200);
-  const out = await res.json();
-  assert.equal(out.found, true);
-  assert.deepEqual(out.matches.map((m) => m.title), ['RA_TEST 2']);
+  const { status, body } = await handleProcess(upload, deps());
+  assert.equal(status, 200);
+  assert.equal(body.found, true);
+  assert.deepEqual(body.matches.map((m) => m.title), ['RA_TEST 2']);
   assert.equal(log.filter((l) => l === 'POST rpc/ms006_match').length, 2);
-  assert.equal(log.filter((l) => l === 'POST ms006_scans').length, 1, 'exactly one insert');
 });
 
-test('Worker: a database that keeps timing out -> 503 busy after the cap, no scan row', async () => {
+test('processor: a database that keeps timing out -> 503 busy after the cap (the queue retries the job)', async () => {
   const log = fakeMoonshots({ timeouts: { always: true } });
-  const res = await worker.fetch(scanRequest(), env, { waitUntil() {} });
-  assert.equal(res.status, 503);
-  assert.deepEqual(await res.json(), { error: 'busy' });
+  assert.deepEqual(await handleProcess(upload, deps()), { status: 503, body: { error: 'busy' } });
   assert.equal(log.filter((l) => l === 'POST rpc/ms006_match').length, RETRY.ATTEMPTS);
-  assert.equal(log.filter((l) => l === 'POST ms006_scans').length, 0);
 });

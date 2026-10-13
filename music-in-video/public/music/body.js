@@ -1,46 +1,69 @@
-// POST /api/scan body, shared by the page (encode) and the Worker (decode).
-// The page sends only its verification peaks and, one bit each, which of
-// them are hash peaks; the Worker rebuilds the query's hashes from those
-// with fp.js pairPeaks and the QUERY settings, exactly as the page made them.
-// About 30 KB a minute of video. Layout, int32s (native byte order:
-// little-endian on every browser and Worker):
-//   [FP_VERSION, duration_ms, nPeaks, peak x nPeaks, flag words]
-//   peak = t * 512 + bin, (t, bin) non-decreasing (a band-edge bin can be a
-//   peak twice); flag words: bit i of word
-//   (i >> 5) set when peak i is a hash peak.
-import { FP_VERSION, QUERY, lowBin, pairPeaks } from './fp.js';
+// POST /api/scan body (MS-007), shared by the page (encode), the Worker
+// (checks it before queueing) and the processor (decode). The page sends the
+// video's soundtrack as it already reads it: mono, 16 kHz, 16-bit, about
+// 1.9 MB a minute (38.4 MB for 20 minutes). The picture never leaves the
+// device, and the soundtrack is deleted once checked. Layout, little-endian:
+//   bytes 0-3   'MS7A'
+//   u32         BODY_VERSION
+//   u32         sample rate (fp.js SAMPLE_RATE)
+//   u32         duration_ms (of the video's audio track)
+//   u32         n, the number of samples
+//   int16 x n   the samples
+import { SAMPLE_RATE } from './fp.js';
 
-export function encodeScanBody({ peakT, peakF, hashPeak, hashPeaksCovered, durationMs }) {
-  if (!hashPeaksCovered) throw new Error('verification peaks must include every hash peak');
-  const n = peakT.length;
-  const words = Math.ceil(n / 32);
-  const body = new Int32Array(3 + n + words);
-  body.set([FP_VERSION, durationMs, n]);
-  for (let i = 0; i < n; i++) {
-    body[3 + i] = peakT[i] * 512 + peakF[i];
-    if (hashPeak[i]) body[3 + n + (i >> 5)] |= 1 << (i & 31);
+export const BODY_VERSION = 1;
+export const HEADER_BYTES = 20;
+export const MAX_DURATION_MS = 20 * 60 * 1000 + 5000; // 20 minutes, plus slack for container rounding
+const MAGIC = 0x4137534d; // 'MS7A' read as a little-endian u32
+
+// The page pushes each resampled chunk as it decodes, so the soundtrack is
+// only ever held once, as 16-bit samples.
+export class PcmCollector {
+  constructor() {
+    this.chunks = [];
+    this.n = 0;
   }
-  return body.buffer;
+
+  push(samples) {
+    const out = new Int16Array(samples.length);
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      out[i] = Math.round(s * 32767);
+    }
+    this.chunks.push(out);
+    this.n += out.length;
+  }
+
+  // -> the body as a list of parts (a Blob in the page, joined in Node).
+  finish(durationMs) {
+    const head = new DataView(new ArrayBuffer(HEADER_BYTES));
+    head.setUint32(0, MAGIC, true);
+    head.setUint32(4, BODY_VERSION, true);
+    head.setUint32(8, SAMPLE_RATE, true);
+    head.setUint32(12, Math.round(durationMs), true);
+    head.setUint32(16, this.n, true);
+    const parts = [head.buffer, ...this.chunks.map((c) => c.buffer)];
+    this.chunks = [];
+    return { parts, bytes: HEADER_BYTES + this.n * 2, durationMs: Math.round(durationMs) };
+  }
 }
 
-// -> { version, durationMs, hashes, times, peaks: { t, f } } or null if the
-// layout doesn't add up (the caller validates values and limits).
+// The header alone: { version, sampleRate, durationMs, n } or null if it isn't
+// one, or the length doesn't add up (the Worker checks this before storing).
+export function readScanHeader(buf, byteLength = buf.byteLength) {
+  if (buf.byteLength < HEADER_BYTES) return null;
+  const v = new DataView(buf, 0, HEADER_BYTES);
+  if (v.getUint32(0, true) !== MAGIC) return null;
+  const head = { version: v.getUint32(4, true), sampleRate: v.getUint32(8, true), durationMs: v.getUint32(12, true), n: v.getUint32(16, true) };
+  return byteLength === HEADER_BYTES + head.n * 2 ? head : null;
+}
+
+// -> { version, sampleRate, durationMs, samples: Float32Array } or null.
 export function decodeScanBody(buf) {
-  if (!buf.byteLength || buf.byteLength % 4) return null;
-  const v = new Int32Array(buf);
-  if (v.length < 3) return null;
-  const [version, durationMs, n] = v;
-  if (!(n >= 0) || v.length !== 3 + n + Math.ceil(n / 32)) return null;
-  const t = new Int32Array(n);
-  const f = new Int32Array(n);
-  const hashPeaks = [];
-  for (let i = 0; i < n; i++) {
-    const p = v[3 + i];
-    if (p < 0 || (i && p < v[2 + i])) return null; // non-decreasing (t, bin)
-    t[i] = Math.floor(p / 512);
-    f[i] = p % 512;
-    if ((v[3 + n + (i >> 5)] >>> (i & 31)) & 1) hashPeaks.push([t[i], f[i]]);
-  }
-  const { hashes, times } = pairPeaks(hashPeaks, QUERY.fanout, lowBin(QUERY.skipLowPairsBelowHz));
-  return { version, durationMs, hashes, times, peaks: { t, f } };
+  const head = readScanHeader(buf);
+  if (!head) return null;
+  const pcm = new Int16Array(buf.slice(HEADER_BYTES));
+  const samples = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 32768;
+  return { ...head, samples };
 }

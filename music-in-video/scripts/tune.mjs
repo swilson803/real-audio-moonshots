@@ -13,7 +13,7 @@
 //   node scripts/tune.mjs --replica /workspace/ms006/replica \
 //     --catalog-dir /workspace/ms006/audio-cache --manifest … [--manifest …] --kind dev,no_music
 //
-//   SUPABASE_URL / SUPABASE_SECRET_KEY   moonshots only (src/scan.js refuses
+//   SUPABASE_URL / SUPABASE_SECRET_KEY   moonshots only (src/moonshots.js refuses
 //                                        production); not needed with --offline
 //                                        or --replica
 //   --manifest PATH   make-test-videos / make-negatives manifest; videos are
@@ -37,7 +37,7 @@ import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { FP_VERSION, QUERY, fingerprint } from '../public/music/fp.js';
 import { TUNABLES, framesToSec, match, tunables } from '../src/match.js';
-import { moonshots } from '../src/scan.js';
+import { moonshots } from '../src/moonshots.js';
 import { decodeToPcm } from './build-catalog-index.mjs';
 import { judge } from '../test/browser-suite.mjs';
 import { withKinds } from './lib/kinds.mjs';

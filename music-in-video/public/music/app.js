@@ -1,8 +1,9 @@
 // Upload page: read the chosen video's soundtrack on this device, send only
-// its fingerprint to the Worker, show the result link and the copy line.
-import { ExtractError, fingerprintVideo } from './extract.js';
+// the soundtrack (never the picture), then wait while the server checks it:
+// "Still working…" until the result, however long that takes. Shows the
+// result link and the copy line, as in MS-006.
+import { ExtractError, readSoundtrack } from './extract.js';
 import { showCopyLine } from './copy.js';
-import { encodeScanBody } from './body.js';
 
 const $ = (id) => document.getElementById(id);
 const form = $('scan-form');
@@ -16,12 +17,16 @@ const formError = $('form-error');
 const submit = $('submit');
 
 const TYPES = /\.(mp4|mov|m4v|webm)$/i;
-// Matching normally takes a few seconds; the first scan after the catalog
-// database has been idle can take much longer (the Worker retries it). Past
-// STILL_WORKING_MS the page says so and keeps waiting.
+// Checking normally takes a few seconds; a cold start (the processor or the
+// catalog database waking up) can take much longer, and the server retries
+// it. Past STILL_WORKING_MS the page says so and keeps waiting: there is no
+// client-side time limit, and every job ends done or failed on the server.
 const STILL_WORKING_MS = 5000;
 const STILL_WORKING = 'Still working… this can take up to a minute.';
-const BUSY = 'The Real Audio catalog is taking too long to answer. Try again in a minute.';
+// Poll every POLL_MS, slowing to POLL_MAX_MS.
+const POLL_MS = 2000;
+const POLL_MAX_MS = 5000;
+const FAILED = 'Something went wrong. Try again.';
 
 const MESSAGES = {
   'no-audio': 'We couldn’t find a soundtrack in that video.',
@@ -59,6 +64,36 @@ function showResult(result) {
   $('found').hidden = false;
 }
 
+// POST the soundtrack with upload progress -> the job id.
+function upload(body, headers, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/scan');
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      if (xhr.status !== 202) return reject(new Error(`scan ${xhr.status}`));
+      try { resolve(JSON.parse(xhr.responseText).id); } catch (err) { reject(err); }
+    };
+    xhr.onerror = () => reject(new Error('upload failed'));
+    xhr.send(new Blob(body.parts, { type: 'application/octet-stream' }));
+  });
+}
+
+// Until the job is done or failed. A poll that fails (network, a busy
+// server) is just tried again.
+async function waitFor(id) {
+  for (let wait = POLL_MS; ; wait = Math.min(POLL_MAX_MS, wait + 1000)) {
+    await new Promise((r) => setTimeout(r, wait));
+    try {
+      const res = await fetch(`/api/scans/${id}/status`, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const s = await res.json();
+      if (s.status === 'done' || s.status === 'failed') return s;
+    } catch { /* try again */ }
+  }
+}
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   formError.textContent = '';
@@ -70,30 +105,30 @@ form.addEventListener('submit', async (e) => {
   submit.disabled = true;
   submit.textContent = 'LISTENING…';
   statusEl.textContent = 'Reading the soundtrack…';
+  const reading = (p) => { statusEl.textContent = `Reading the soundtrack… ${Math.round(p * 100)}%`; };
   try {
-    const fp = await fingerprintVideo(file, (p) => {
-      statusEl.textContent = `Reading the soundtrack… ${Math.round(p * 100)}%`;
-    });
-    statusEl.textContent = 'Matching against the Real Audio catalog…';
-    const headers = { 'Content-Type': 'application/octet-stream' };
+    // Reading is the first half of the progress, sending the second.
+    let body = await readSoundtrack(file, (p) => reading(p / 2));
+    const headers = {};
     // Test videos (RA_TEST_...) are labelled so their scans can be cleared.
     if (/^RA_TEST_[A-Za-z0-9._-]{1,80}$/.test(file.name)) headers['x-scan-label'] = file.name;
+    const id = await upload(body, headers, (p) => reading(0.5 + p / 2));
+    body = null;
+    statusEl.textContent = 'Matching against the Real Audio catalog…';
     const slow = setTimeout(() => { statusEl.textContent = STILL_WORKING; }, STILL_WORKING_MS);
-    let res;
+    let result;
     try {
-      res = await fetch('/api/scan', { method: 'POST', headers, body: encodeScanBody(fp) });
+      result = await waitFor(id);
     } finally {
       clearTimeout(slow);
     }
-    if (res.status === 503 && (await res.clone().json().catch(() => ({}))).error === 'busy') throw new Error('busy');
-    if (!res.ok) throw new Error(`scan ${res.status}`);
     statusEl.textContent = '';
-    showResult(await res.json());
+    if (result.status === 'failed') throw new ExtractError(MESSAGES[result.error] ? result.error : 'failed');
+    showResult({ found: result.found, id, matches: result.matches ?? [] });
   } catch (error) {
     console.error(error);
     statusEl.textContent = '';
-    if (error instanceof ExtractError) formError.textContent = MESSAGES[error.code];
-    else formError.textContent = error.message === 'busy' ? BUSY : 'Something went wrong. Try again.';
+    formError.textContent = (error instanceof ExtractError && MESSAGES[error.code]) || FAILED;
   } finally {
     submit.disabled = false;
     submit.textContent = 'FIND MY MUSIC';
