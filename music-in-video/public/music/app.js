@@ -1,9 +1,10 @@
 // Upload page: read the chosen video's soundtrack on this device, send only
 // the soundtrack (never the picture), then wait while the server checks it:
 // "Still working…" until the result, however long that takes. Shows the
-// result link and the copy line, as in MS-006.
+// per-platform credit (credit.js) and the found tracks (tracks.js).
 import { ExtractError, readSoundtrack } from './extract.js';
-import { showCopyLine } from './copy.js';
+import { mountCredit } from './credit.js';
+import { renderTracks } from './tracks.js';
 
 const $ = (id) => document.getElementById(id);
 const form = $('scan-form');
@@ -47,7 +48,11 @@ fileInput.addEventListener('change', () => {
   fileName.textContent = file ? file.name : 'No file chosen';
   filePick.classList.toggle('has-file', Boolean(file));
   filePickLabel.textContent = file ? 'VIDEO CHOSEN' : 'CHOOSE VIDEO';
-  fileError.textContent = file ? validate(file) || '' : '';
+  const err = file ? validate(file) : null;
+  fileError.textContent = err || '';
+  // Guide the creator: once a usable video is chosen, its frame goes thin
+  // and FIND MY MUSIC's goes thick (styles.css .check-form.is-chosen).
+  form.classList.toggle('is-chosen', Boolean(file) && !err);
 });
 
 function showResult(result) {
@@ -58,9 +63,12 @@ function showResult(result) {
   }
   const n = result.matches.length;
   $('found-summary').textContent = `We found ${n} Real Audio track${n === 1 ? '' : 's'} in your video.`;
-  const link = `${location.origin}/v/${result.id}`;
-  showCopyLine($('copy-line'), $('copy'), link);
-  $('open-result').href = link;
+  // The scan's short link, written without the scheme as the main site's
+  // description credit is (library.real.audio/t/<code>).
+  const link = `${location.host}/v/${result.id}`;
+  $('found').dataset.scanId = result.id;
+  mountCredit($('credit'), result.matches, link);
+  renderTracks($('found-tracks'), result.matches);
   $('found').hidden = false;
 }
 

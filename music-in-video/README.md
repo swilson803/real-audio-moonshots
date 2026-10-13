@@ -6,7 +6,11 @@ order with its start time, title, artist and a stream button, plus a one-tap
 copy of `music in this video: <link>` for the video description. No account.
 MS-007 moves the processing off the Worker into a container behind a queue,
 gets start times from the matched track's waveform, and makes the header
-plain brand type.
+plain brand type. MS-007 Reject 1 puts the main site's credit block on the
+upload page's result (`public/music/credit.js`): a tab per platform
+(YT / FB / X / Twitch, TikTok, Instagram, YouTube Shorts) whose credit box
+copies in one tap, with the `/v/<id>` link in the description credit and
+Real Audio's tag on the short-form ones, then the found tracks.
 
 Shares one Worker, `real-audio-moonshots`, and its domain
 (copyrighttester.real.audio) with the clearance check:
