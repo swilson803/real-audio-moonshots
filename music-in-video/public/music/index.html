@@ -6,7 +6,7 @@
   <title>Music in this video | Real Audio</title>
   <meta name="description" content="Upload your finished video and get one link that credits the Real Audio music in it.">
   <link rel="icon" href="/music/favicon.ico">
-  <link rel="stylesheet" href="/music/styles.css?v=ms007-1">
+  <link rel="stylesheet" href="/music/styles.css?v=ms007-r1">
 </head>
 <body>
   <div class="page surface-sketched">
@@ -46,13 +46,12 @@
 
           <section class="stack" id="found" hidden>
             <p class="lead result-lead" id="found-summary"></p>
-            <div class="box-sketched-light copy-box">
-              <p class="copy-line" id="copy-line"></p>
-              <button class="btn-primary-cta copy-btn" type="button" id="copy">COPY</button>
+            <div class="credit" id="credit"></div>
+            <div class="box-sketched-light" id="found-tracks-box">
+              <ol class="tracks" id="found-tracks"></ol>
             </div>
             <div class="actions">
-              <a class="btn-primary-cta" id="open-result" href="/music/">see your tracks</a>
-              <a class="btn-default" href="/music/">check another video</a>
+              <a class="btn-primary-cta" href="/music/">check another video</a>
             </div>
           </section>
 
@@ -66,6 +65,6 @@
       </div>
     </main>
   </div>
-  <script src="/music/app.js?v=ms007-1" type="module"></script>
+  <script src="/music/app.js?v=ms007-r1" type="module"></script>
 </body>
 </html>

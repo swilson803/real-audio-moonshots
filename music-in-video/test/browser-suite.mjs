@@ -5,9 +5,15 @@
 //    compared with the manifest (track_id in order, start within +-1 s,
 //    nothing extra; no-music videos get the no-match message and no link);
 //    what was sent must be the soundtrack body (body.js), never the video;
-//  - the two-track and no-music videos are re-run at 375 / 768 / 1280 for
-//    screenshots, overflow, the copy line, COPY (one tap at 375), the result
-//    page rows and the Play button;
+//  - the two-track and no-music videos are re-run at 281 / 320 / 375 / 768 /
+//    1280 for screenshots, overflow, the two buttons (same frame; CHOOSE
+//    VIDEO red / FIND MY MUSIC black, then VIDEO CHOSEN black / FIND MY MUSIC
+//    red), FIND MY MUSIC never covered, the red results lines, the
+//    credit block (per-platform tabs, text, copy: one tap on phones), the
+//    found tracks under it, "check another video", and the /v/ page (rows,
+//    Play, its copy line);
+//  - the preview-only demo mode (?demo=found / none) shows fixtures with no
+//    /api/ request on allowed hosts and is ignored on the production hosts;
 //  - the header on both pages is plain brand type (DOM + one-colour pixels);
 //  - with `faults` (the synthetic harness): slow paths behind the queue
 //    (cold container + database timeouts, a crash mid-job, a 90 s job, retries
@@ -21,6 +27,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { CREDIT_LOCATION, TABS, creditLink, creditText } from '../public/music/credit.js';
 
 const require = createRequire(import.meta.url);
 const run = promisify(execFile);
@@ -55,6 +62,7 @@ async function durationOf(file) {
  * @param videosDir  where the files are
  * @param catalog    [{ track_id, stream_url, file }] local audio for Play
  * @param shotsDir   screenshots
+ * @param demoShotsDir  the demo-mode screenshots (default shotsDir)
  * @param labelFor   optional (file) => x-scan-label for its POST /api/scan
  * @param check      (name, ok, detail) => void
  * @param cloud      optional test/local-cloud.mjs instance: uploads left,
@@ -63,10 +71,13 @@ async function durationOf(file) {
  *                   (test/fake-moonshots.mjs) for the slow-path checks (needs
  *                   cloud)
  */
-export async function runBrowserSuite({ origin, videos, videosDir, catalog, shotsDir, labelFor = null, check, cloud = null, faults = null }) {
+export async function runBrowserSuite({ origin, videos, videosDir, catalog, shotsDir, demoShotsDir = shotsDir, labelFor = null, check, cloud = null, faults = null }) {
   const { chromium } = require('playwright');
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/opt/google/chrome/chrome' });
   const browserRequests = [];
+  // Other hostnames the demo checks serve this local build under (2a);
+  // answered by Playwright, never sent to the network.
+  const servedLocally = new Set();
   const playRequests = [];
   const results = [];
   let label = null;
@@ -124,9 +135,9 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
     const sent = browserRequests.slice(before).filter((r) => new URL(r.url).pathname === '/api/scan');
     const body = { bytes: sent.reduce((n, r) => n + r.bytes, 0), magic: sent[0]?.magic ?? null, n: sent[0]?.n ?? null };
     if (await page.isVisible('#found')) {
-      const link = await page.getAttribute('#open-result', 'href');
-      const scan = await (await page.request.get(`${origin}/api/scans/${link.split('/v/')[1]}`)).json();
-      return { found: true, link, id: link.split('/v/')[1], scan, ms, body, label };
+      const foundId = await page.getAttribute('#found', 'data-scan-id');
+      const scan = await (await page.request.get(`${origin}/api/scans/${foundId}`)).json();
+      return { found: true, link: `${origin}/v/${foundId}`, id: foundId, scan, ms, body, label };
     }
     if (await page.isVisible('#none')) return { found: false, id, ms, body, label, linkShown: await page.isVisible('#found') };
     return { error: await page.textContent('#form-error'), id, ms, body, label };
@@ -232,59 +243,238 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
     check('no timeout text and no error line during the uploads', s1.timeouts.length === 0 && s1.errors.length === 0, JSON.stringify(s1));
     await page.context().close();
 
-    // 2. UI at 375 / 768 / 1280 with the two-track and no-music videos.
+    // 2. UI at 281 / 320 / 375 / 768 / 1280 with the two-track and no-music
+    // videos (MS-007 Rejects 1 and 3): the two buttons' red / black swap on
+    // one frame, FIND MY MUSIC never covered,
+    // the red results lines, the credit block (tabs, text, copy), the found
+    // tracks under it, "check another video", then the /v/ page as before.
     const two = videos.find((v) => v.kind === 'two_tracks');
     const none = videos.find((v) => v.kind === 'no_music');
-    for (const width of [375, 768, 1280]) {
-      const touch = width === 375 ? { hasTouch: true, isMobile: true } : {};
-      const p = await newPage({ width, height: width === 375 ? 812 : 1000 }, touch);
+    const RED = 'rgb(229, 90, 60)';
+    const rectOf = (page, sel) => page.$eval(sel, (el) => { const r = el.getBoundingClientRect(); return [r.x, r.y + scrollY, r.width, r.height].map(Math.round).join(','); });
+    // A 3x3 grid on FIND MY MUSIC: every point must hit it (or its text).
+    const submitHits = (page) => page.evaluate(() => {
+      const b = document.getElementById('submit');
+      b.scrollIntoView({ block: 'center' });
+      const r = b.getBoundingClientRect();
+      const miss = [];
+      for (const fx of [0.1, 0.5, 0.9]) for (const fy of [0.2, 0.5, 0.8]) {
+        const e = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+        if (!(e && (e === b || b.contains(e)))) miss.push(`${fx},${fy}:${e ? e.id || e.className || e.tagName : null}`);
+      }
+      return miss;
+    });
+    // Reject 3: both buttons wear the same frame (image family, slice and
+    // width); red then black before a video, black then red after one.
+    const BLACK = 'rgb(26, 26, 26)';
+    const look = (page) => page.evaluate(() => Object.fromEntries(['file-pick', 'submit'].map((id) => {
+      const cs = getComputedStyle(document.getElementById(id));
+      return [id, { color: cs.color, frame: cs.borderImageSource.match(/frame-[\w-]+/)?.[0] ?? null, width: cs.borderTopWidth, slice: cs.borderImageSlice }];
+    })));
+    const steps = async (page, chosen) => {
+      const l = await look(page);
+      const pick = l['file-pick'];
+      const cta = l.submit;
+      const red = (b) => b.color === RED && b.frame === 'frame-search-heavy-red';
+      const black = (b) => b.color === BLACK && b.frame === 'frame-search-heavy-black';
+      const same = pick.width === cta.width && pick.slice === cta.slice;
+      return { ok: same && (chosen ? black(pick) && red(cta) : red(pick) && black(cta)), detail: JSON.stringify(l) };
+    };
+    const settle = (page) => page.waitForTimeout(250); // the 120-150 ms frame / overlay transitions
+    for (const width of [281, 320, 375, 768, 1280]) {
+      const mobile = width <= 375;
+      const touch = mobile ? { hasTouch: true, isMobile: true } : {};
+      const press = (page, sel) => (mobile ? page.tap(sel) : page.click(sel));
+      const p = await newPage({ width, height: mobile ? 812 : 1000 }, touch);
       await p.goto(`${origin}/music/`);
       await p.evaluate(() => document.fonts.ready);
-      await p.screenshot({ path: `${shotsDir}/upload-${width}.png`, fullPage: true });
+      await p.screenshot({ path: `${shotsDir}/upload-rest-${width}.png`, fullPage: true });
       check(`upload page fits ${width}`, await noOverflow(p));
       check(`upload page hint at ${width}`, (await p.textContent('#file-hint')).trim() === 'MP4, MOV, M4V or WebM, up to 20 minutes. Only the soundtrack is sent, and it’s deleted once checked.');
+      let st = await steps(p, false);
+      check(`before a video: CHOOSE VIDEO red, FIND MY MUSIC black, same frame at ${width}`, st.ok, st.detail);
+      const ctaHeight = await p.$eval('#submit', (el) => el.getBoundingClientRect().height);
+      check(`FIND MY MUSIC on one line at ${width}`, ctaHeight <= 72, `${ctaHeight}px`);
+      let miss = await submitHits(p);
+      check(`FIND MY MUSIC not covered, no video, at ${width}`, !miss.length, miss.join(' '));
+      const rects = [await rectOf(p, '#file-pick'), await rectOf(p, '#submit')];
+
+      await p.setInputFiles('#file', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a video') });
+      await settle(p);
+      await p.screenshot({ path: `${shotsDir}/upload-invalid-${width}.png`, fullPage: true });
+      st = await steps(p, false);
+      check(`an unusable file keeps CHOOSE red / FIND black (and shows why) at ${width}`, st.ok && (await p.textContent('#file-error')).includes('isn’t supported'), st.detail);
+      miss = await submitHits(p);
+      check(`FIND MY MUSIC not covered, error line, at ${width}`, !miss.length, miss.join(' '));
+
       if (two) {
         await p.setInputFiles('#file', join(videosDir, two.file));
+        await settle(p);
+        await p.mouse.move(0, 0);
         await p.screenshot({ path: `${shotsDir}/upload-chosen-${width}.png`, fullPage: true });
-        const r = await upload(p, two.file);
-        await p.screenshot({ path: `${shotsDir}/upload-found-${width}.png`, fullPage: true });
-        check(`found state fits ${width}`, r.found && (await noOverflow(p)));
-        if (r.found) {
-          const line = (await p.textContent('#copy-line')).trim();
-          check(`copy line reads "music in this video: <link>" at ${width}`, line === `music in this video: ${r.link}`, line);
-          if (width === 375) await p.tap('#copy'); else await p.click('#copy');
-          const clip = await p.evaluate(() => navigator.clipboard.readText());
-          check(`COPY is one ${width === 375 ? 'tap' : 'click'} at ${width}`, clip === `music in this video: ${r.link}`, clip);
-          check(`COPY confirms at ${width}`, (await p.textContent('#copy')) === 'COPIED');
+        st = await steps(p, true);
+        check(`video chosen: VIDEO CHOSEN black, FIND MY MUSIC red, same frame at ${width}`, st.ok && (await p.textContent('#file-pick')).trim() === 'VIDEO CHOSEN', st.detail);
+        const after = [await rectOf(p, '#file-pick'), await rectOf(p, '#submit')];
+        // The file name line under the button can change the CTA's y; its
+        // x, width and height must not move.
+        const xwh = (r) => r.split(',').filter((_, i) => i !== 1).join(',');
+        check(`the frame swap moves nothing at ${width}`, rects[0] === after[0] && xwh(rects[1]) === xwh(after[1]), `${rects.join(' ')} -> ${after.join(' ')}`);
+        miss = await submitHits(p);
+        check(`FIND MY MUSIC not covered, video chosen, at ${width}`, !miss.length, miss.join(' '));
+        if (!mobile) {
+          await p.hover('#file-pick');
+          miss = await submitHits(p);
+          check(`FIND MY MUSIC not covered, video button hovered, at ${width}`, !miss.length, miss.join(' '));
+          await p.mouse.move(0, 0);
+        }
 
-          await p.goto(r.link);
-          await p.waitForSelector('#tracks .track');
+        // FIND MY MUSIC with Playwright's actionability checks (a real tap
+        // on phones), as the Tester's run did.
+        const t0 = Date.now();
+        let pressed = true;
+        await press(p, '#submit').catch(() => { pressed = false; });
+        check(`FIND MY MUSIC takes one ${mobile ? 'tap' : 'click'} at ${width}`, pressed);
+        await p.waitForFunction(() => document.getElementById('submit').textContent === 'LISTENING…' || !document.getElementById('found').hidden, null, { timeout: 30000 }).catch(() => {});
+        if (await p.isVisible('#scan-form')) await p.screenshot({ path: `${shotsDir}/upload-listening-${width}.png`, fullPage: true });
+        await p.waitForFunction(() => !document.getElementById('found').hidden || !document.getElementById('none').hidden || document.getElementById('form-error').textContent, null, { timeout: 600000 });
+        const id = await p.getAttribute('#found', 'data-scan-id');
+        const scan = id ? await (await p.request.get(`${origin}/api/scans/${id}`)).json() : null;
+        check(`two-track video found at ${width}`, Boolean(scan) && judge(two, true, scan.matches), `${Date.now() - t0} ms`);
+        if (scan) {
+          const link = `${origin}/v/${id}`;
+          await p.mouse.move(0, 0);
           await p.evaluate(() => document.fonts.ready);
-          await p.screenshot({ path: `${shotsDir}/result-${width}.png`, fullPage: true });
-          check(`result page fits ${width}`, await noOverflow(p));
-          const rows = await p.$$eval('#tracks .track', (els) => els.map((el) => ({
+          const n = two.expect.length;
+          check(`found line in brand red at ${width}`,
+            (await p.textContent('#found-summary')) === `We found ${n} Real Audio tracks in your video.` && (await p.$eval('#found-summary', (el) => getComputedStyle(el).color)) === RED);
+          const order = await p.evaluate(() => [...document.querySelectorAll('#found > *')].map((el) => el.id || el.className));
+          check(`found: summary, credit, tracks, then the button at ${width}`, order.join('|') === 'found-summary|credit|found-tracks-box|actions', order.join('|'));
+          const another = await p.$eval('#found .actions', (el) => ({
+            n: el.children.length, cls: el.firstElementChild.className, text: el.textContent.trim(), href: el.firstElementChild.getAttribute('href'),
+          }));
+          check(`only "check another video" at ${width} (no see your tracks)`,
+            another.n === 1 && another.text === 'check another video' && another.href === '/music/' && !(await p.$('#open-result')) && !/see your tracks/i.test(await p.textContent('#found')), JSON.stringify(another));
+          const btn = '#found .actions .btn-primary-cta';
+          const rest = await p.$eval(btn, (el) => ({ color: getComputedStyle(el).color, frame: getComputedStyle(el).borderImageSource.match(/frame-[\w-]+/)?.[0] }));
+          check(`"check another video" brand red at rest at ${width}`, another.cls === 'btn-primary-cta' && rest.color === RED && rest.frame === 'frame-button-heavy-red', JSON.stringify(rest));
+          if (!mobile) {
+            await p.hover(btn);
+            await settle(p);
+            const hov = await p.$eval(btn, (el) => { const cs = getComputedStyle(el); return { t: cs.transform, f: cs.filter, color: cs.color, frame: cs.borderImageSource.match(/frame-[\w-]+/)?.[0] }; });
+            await p.screenshot({ path: `${shotsDir}/found-another-hover-${width}.png`, fullPage: true });
+            check(`"check another video" only grows on hover at ${width}`, /^matrix\(1\.04, 0, 0, 1\.04/.test(hov.t) && hov.f === 'none' && hov.color === RED && hov.frame === 'frame-button-heavy-red', JSON.stringify(hov));
+            await p.mouse.move(0, 0);
+          }
+
+          // The credit block.
+          const tabs = await p.$$eval('#credit [role="tab"]', (els) => els.map((el) => ({ label: el.textContent, selected: el.getAttribute('aria-selected') })));
+          check(`credit block heading and tabs at ${width}`,
+            (await p.textContent('#credit .credit-heading')) === 'Where are you posting?'
+            && tabs.map((t) => t.label).join('|') === TABS.map((t) => t.label).join('|')
+            && tabs.map((t) => t.selected).join('|') === 'true|false|false|false', JSON.stringify(tabs));
+          const shortName = { universal: 'yt', tiktok: 'tiktok', instagram: 'instagram', youtube_shorts: 'shorts' };
+          const link1 = creditLink(id);
+          for (const t of TABS) {
+            await press(p, `#credit-tab-${t.value}`);
+            await p.mouse.move(0, 0);
+            await settle(p);
+            const got = await p.evaluate(() => ({
+              where: document.querySelector('#credit .credit-where').textContent,
+              text: document.querySelector('#credit .accred-text').textContent,
+              selected: document.querySelector('#credit [aria-selected="true"]').dataset.value,
+            }));
+            const want = creditText(t, scan.matches, link1);
+            check(`${t.label} tab: "Paste in your ${CREDIT_LOCATION[t.medium]}:" and its credit at ${width}`,
+              got.selected === t.value && got.where === `Paste in your ${CREDIT_LOCATION[t.medium]}:` && got.text === want, JSON.stringify(got));
+            check(`${t.label} tab fits ${width}`, await noOverflow(p));
+            await p.screenshot({ path: `${shotsDir}/found-${shortName[t.value]}-${width}.png`, fullPage: true });
+          }
+          if (!mobile) {
+            await p.focus('#credit-tab-youtube_shorts');
+            const keys = [];
+            for (const k of ['ArrowRight', 'End', 'ArrowLeft', 'Home']) {
+              await p.keyboard.press(k);
+              keys.push(await p.evaluate(() => `${document.activeElement.dataset.value}/${document.querySelector('#credit [aria-selected="true"]').dataset.value}`));
+            }
+            check(`credit tabs by keyboard at ${width}`, keys.join(' ') === 'universal/universal youtube_shorts/youtube_shorts instagram/instagram universal/universal', keys.join(' '));
+          }
+          for (const t of [TABS[0], TABS[1]]) {
+            await press(p, `#credit-tab-${t.value}`);
+            await p.mouse.move(0, 0);
+            await settle(p);
+            if (!mobile && t === TABS[0]) {
+              await p.hover('#credit .download-accred');
+              await settle(p);
+              const ov = await p.$eval('#credit .accred-overlay', (el) => ({ text: el.textContent, opacity: getComputedStyle(el).opacity }));
+              check(`credit box shows "Copy" on hover at ${width}`, ov.text === 'Copy' && ov.opacity === '1', JSON.stringify(ov));
+              await p.screenshot({ path: `${shotsDir}/found-copy-hover-${width}.png`, fullPage: true });
+            }
+            await p.evaluate(() => navigator.clipboard.writeText(''));
+            await press(p, '#credit .download-accred');
+            const t1 = Date.now();
+            const clip = await p.evaluate(() => navigator.clipboard.readText());
+            const want = creditText(t, scan.matches, link1);
+            check(`${t.label} credit copies in one ${mobile ? 'tap' : 'click'} at ${width}`, clip === want, JSON.stringify(clip));
+            await settle(p);
+            const st = await p.$eval('#credit .download-accred', (el) => ({ label: el.getAttribute('aria-label'), copied: el.dataset.copied, overlay: el.querySelector('.accred-overlay').textContent, status: el.querySelector('[role="status"]').textContent }));
+            check(`${t.label} credit says "Copied!" at ${width}`, st.label === 'Copied!' && st.copied === 'true' && st.overlay === 'Copied!' && st.status === 'Copied!', JSON.stringify(st));
+            if (t === TABS[0]) await p.screenshot({ path: `${shotsDir}/found-copied-${width}.png`, fullPage: true });
+            if (!mobile) {
+              await p.waitForTimeout(Math.max(0, 1500 - (Date.now() - t1)));
+              const held = await p.getAttribute('#credit .download-accred', 'aria-label');
+              await p.waitForTimeout(Math.max(0, 2200 - (Date.now() - t1)));
+              const stillHovered = await p.getAttribute('#credit .download-accred', 'aria-label');
+              await p.mouse.move(0, 0);
+              await settle(p);
+              const left = await p.getAttribute('#credit .download-accred', 'aria-label');
+              check(`"Copied!" holds 2 s and while hovered, then "Copy" at ${width}`, held === 'Copied!' && stillHovered === 'Copied!' && left === 'Copy credit', `${held} / ${stillHovered} / ${left}`);
+            } else {
+              await p.waitForTimeout(Math.max(0, 2300 - (Date.now() - t1)));
+              check(`"Copied!" resets after 2 s at ${width}`, (await p.getAttribute('#credit .download-accred', 'aria-label')) === 'Copy credit');
+            }
+          }
+
+          // Found tracks under the credit.
+          const secs = (t) => t.split(':').reduce((a, b) => a * 60 + Number(b), 0);
+          const readRows = (page, sel) => page.$$eval(`${sel} .track`, (els) => els.map((el) => ({
             time: el.querySelector('.track-time').textContent,
             title: el.querySelector('.track-title').textContent,
             artist: el.querySelector('.track-artist').textContent,
           })));
-          const secs = (t) => t.split(':').reduce((a, b) => a * 60 + Number(b), 0);
-          check(`result rows in order with start, title, artist at ${width}`,
-            rows.length === two.expect.length && rows.every((row, i) => row.title === two.expect[i].title && row.artist === two.expect[i].artist && near(secs(row.time), two.expect[i].start_s)),
-            `${JSON.stringify(rows)} want ${JSON.stringify(two.expect.map((w) => [w.start_s, w.title, w.artist]))}`);
-          check(`result summary at ${width}`, (await p.textContent('#summary')) === `${two.expect.length} Real Audio tracks are in this video, in order.`);
+          const rowsOk = (rows) => rows.length === two.expect.length && rows.every((row, i) => row.title === two.expect[i].title && row.artist === two.expect[i].artist && near(secs(row.time), two.expect[i].start_s));
+          const found = await readRows(p, '#found-tracks');
+          check(`found tracks with start times under the credit at ${width}`, rowsOk(found), `${JSON.stringify(found)} want ${JSON.stringify(two.expect.map((w) => [w.start_s, w.title, w.artist]))}`);
+          const before = await p.evaluate(() => window.__audios.length);
+          await press(p, '#found-tracks .play-btn');
+          await p.waitForFunction((k) => window.__audios[k] && window.__audios[k].currentTime > 0.5, before, { timeout: 20000 }).catch(() => {});
+          const played = await p.evaluate((k) => ({ src: window.__audios[k]?.src, t: window.__audios[k]?.currentTime ?? 0 }), before);
+          check(`found track plays at ${width}`, played.t > 0.5 && same(played.src, scan.matches[0]?.stream_url), JSON.stringify(played));
+          await p.evaluate((k) => window.__audios[k]?.pause(), before);
+          check(`found state fits ${width}`, await noOverflow(p));
 
-          const btn = p.locator('.play-btn').first();
-          if (width === 375) await btn.tap(); else await btn.click();
+          // The /v/ page, unchanged.
+          await p.goto(link);
+          await p.waitForSelector('#tracks .track');
+          await p.evaluate(() => document.fonts.ready);
+          await p.screenshot({ path: `${shotsDir}/v-result-${width}.png`, fullPage: true });
+          check(`result page fits ${width}`, await noOverflow(p));
+          const rows = await readRows(p, '#tracks');
+          check(`result rows in order with start, title, artist at ${width}`, rowsOk(rows), JSON.stringify(rows));
+          check(`result summary at ${width}`, (await p.textContent('#summary')) === `${two.expect.length} Real Audio tracks are in this video, in order.`);
+          const line = (await p.textContent('#copy-line')).trim();
+          check(`result page copy line reads "music in this video: <link>" at ${width}`, line === `music in this video: ${link}`, line);
+          const vbtn = p.locator('.play-btn').first();
+          if (mobile) await vbtn.tap(); else await vbtn.click();
           await p.waitForFunction(() => window.__audios[0] && window.__audios[0].currentTime > 0.5, null, { timeout: 20000 }).catch(() => {});
           const audio = await p.evaluate(() => ({ src: window.__audios[0]?.src, t: window.__audios[0]?.currentTime ?? 0 }));
-          const wantUrl = r.scan.matches[0]?.stream_url;
-          check(`stream button plays at ${width}`, audio.t > 0.5 && same(audio.src, wantUrl), JSON.stringify(audio));
-          await p.screenshot({ path: `${shotsDir}/result-playing-${width}.png`, fullPage: true });
-          if (width === 375) await p.tap('#copy'); else await p.click('#copy');
-          check(`result page COPY at ${width}`, (await p.evaluate(() => navigator.clipboard.readText())) === `music in this video: ${r.link}`);
+          check(`stream button plays at ${width}`, audio.t > 0.5 && same(audio.src, scan.matches[0]?.stream_url), JSON.stringify(audio));
+          await p.screenshot({ path: `${shotsDir}/v-result-playing-${width}.png`, fullPage: true });
+          await press(p, '#copy');
+          check(`result page COPY at ${width}`, (await p.evaluate(() => navigator.clipboard.readText())) === `music in this video: ${link}`);
+          check(`result page COPY confirms at ${width}`, (await p.textContent('#copy')) === 'COPIED');
 
           const hp = await newPage({ width, height: 900 });
-          await hp.goto(r.link);
+          await hp.goto(link);
           await hp.waitForSelector('#tracks .track');
           await hp.evaluate(() => document.fonts.ready);
           await headerChecks(hp, 'result page', width);
@@ -293,8 +483,14 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       }
       if (none) {
         const n = await upload(p, none.file);
-        await p.screenshot({ path: `${shotsDir}/upload-none-${width}.png`, fullPage: true });
-        check(`no-match message and no link at ${width}`, n.found === false && !n.linkShown && (await p.textContent('#none')).includes('We didn’t find any Real Audio music in this video.'));
+        await p.mouse.move(0, 0);
+        await settle(p);
+        await p.screenshot({ path: `${shotsDir}/none-${width}.png`, fullPage: true });
+        const lead = await p.$eval('#none .result-lead', (el) => ({ text: el.textContent, color: getComputedStyle(el).color }));
+        const nbtn = await p.$eval('#none .actions .btn-primary-cta', (el) => ({ text: el.textContent, color: getComputedStyle(el).color }));
+        check(`no-match message in brand red, no link at ${width}`, n.found === false && !n.linkShown && lead.text === 'We didn’t find any Real Audio music in this video.' && lead.color === RED, JSON.stringify(lead));
+        check(`no-match "check another video" brand red at ${width}`, nbtn.text === 'check another video' && nbtn.color === RED, JSON.stringify(nbtn));
+        check(`no-match state fits ${width}`, await noOverflow(p));
       }
       const hp = await newPage({ width, height: 900 });
       await hp.goto(`${origin}/music/`);
@@ -309,6 +505,130 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
     await p404.waitForFunction(() => document.getElementById('summary').textContent !== 'Loading…');
     check('unknown result link says so', (await p404.textContent('#summary')).includes('couldn’t find'));
     await p404.context().close();
+
+    // 2a. Preview-only demo mode (public/music/demo.js): ?demo=found and
+    // ?demo=none show fixtures with no /api/ request on allowed hosts (this
+    // local origin, a preview URL) and are ignored on the production hosts,
+    // where the normal flow runs. Other hosts are this local build served
+    // under that name by Playwright (no network, no DNS).
+    {
+      const { DEMO_ID, DEMO_MATCHES } = await import('../public/music/demo.js');
+      await mkdir(demoShotsDir, { recursive: true });
+      const asHost = (page, host) => servedLocally.add(host) && page.context().route(`https://${host}/**`, async (route) => {
+        const u = new URL(route.request().url());
+        await route.fulfill({ response: await route.fetch({ url: `${origin}${u.pathname}${u.search}` }) });
+      });
+      const apiCalls = (page) => {
+        const calls = [];
+        page.on('request', (r) => { if (new URL(r.url()).pathname.startsWith('/api/')) calls.push(`${r.method()} ${r.url()}`); });
+        return calls;
+      };
+      const shown = (page) => page.evaluate(() => ({
+        form: !document.getElementById('scan-form').hidden,
+        found: !document.getElementById('found').hidden,
+        none: !document.getElementById('none').hidden,
+        note: document.getElementById('demo-note')?.textContent ?? null,
+      }));
+      const NOTE = 'Demo preview: fixture results, not a real scan.';
+      for (const width of [281, 375, 1280]) {
+        const mobile = width <= 375;
+        for (const state of ['found', 'none']) {
+          const p = await newPage({ width, height: mobile ? 812 : 1000 }, mobile ? { hasTouch: true, isMobile: true } : {});
+          const calls = apiCalls(p);
+          await p.goto(`${origin}/music/?demo=${state}`);
+          await p.waitForSelector(`#${state}:not([hidden])`, { timeout: 10000 }).catch(() => {});
+          await p.evaluate(() => document.fonts.ready);
+          await p.waitForTimeout(1000); // room for any late request
+          const s = await shown(p);
+          check(`demo=${state} renders the fixture result at ${width}`,
+            !s.form && s.found === (state === 'found') && s.none === (state === 'none') && s.note === NOTE, JSON.stringify(s));
+          if (state === 'found') {
+            const got = await p.evaluate(() => ({
+              summary: document.getElementById('found-summary').textContent,
+              id: document.getElementById('found').dataset.scanId,
+              credit: document.querySelector('#credit .accred-text').textContent,
+              rows: [...document.querySelectorAll('#found-tracks .track')].map((el) => `${el.querySelector('.track-time').textContent} ${el.querySelector('.track-title').textContent} / ${el.querySelector('.track-artist').textContent}`),
+            }));
+            const want = {
+              summary: 'We found 2 Real Audio tracks in your video.',
+              id: DEMO_ID,
+              credit: creditText(TABS[0], DEMO_MATCHES, creditLink(DEMO_ID)),
+              rows: ['0:04 Demo Track One (fixture) / Demo Artist (not real)', '0:40 Demo Track Two (fixture) / Another Demo Artist (not real)'],
+            };
+            check(`demo=found shows the fixture tracks and credit at ${width}`, JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got));
+            if (width === 1280) {
+              await p.click('#credit-tab-tiktok');
+              await p.click('#credit .download-accred');
+              check('demo=found credit copies', (await p.evaluate(() => navigator.clipboard.readText())) === creditText(TABS[1], DEMO_MATCHES, ''));
+              const k = await p.evaluate(() => window.__audios.length);
+              await p.click('#found-tracks .play-btn');
+              await p.waitForFunction((i) => window.__audios[i] && window.__audios[i].currentTime > 0.2, k, { timeout: 10000 }).catch(() => {});
+              const a = await p.evaluate((i) => ({ src: window.__audios[i]?.src ?? '', t: window.__audios[i]?.currentTime ?? 0 }), k);
+              check('demo=found Play uses the local silent clip', a.src.startsWith('blob:') && a.t > 0.2, JSON.stringify(a));
+              await p.mouse.move(0, 0);
+              await p.waitForTimeout(2300);
+            }
+          }
+          check(`demo=${state} fits ${width}`, await noOverflow(p));
+          await p.screenshot({ path: `${demoShotsDir}/demo-${state}-${width}.png`, fullPage: true });
+          check(`demo=${state} makes no /api/ request at ${width}`, calls.length === 0, calls.join(', '));
+          await p.context().close();
+        }
+      }
+
+      // Not a demo value: the normal page.
+      {
+        const p = await newPage({ width: 1280, height: 1000 });
+        const calls = apiCalls(p);
+        await p.goto(`${origin}/music/?demo=error`);
+        await p.waitForTimeout(1000);
+        const s = await shown(p);
+        check('?demo=<anything else> is the normal page', s.form && !s.found && !s.none && s.note === null && calls.length === 0, JSON.stringify(s));
+        await p.context().close();
+      }
+
+      // A preview URL runs the demo.
+      {
+        const host = 'claude-ms-007-r1-credit-flow-real-audio-moonshots.spencerrwilson.workers.dev';
+        const p = await newPage({ width: 1280, height: 1000 });
+        await asHost(p, host);
+        const calls = apiCalls(p);
+        await p.goto(`https://${host}/music/?demo=found`);
+        await p.waitForSelector('#found:not([hidden])', { timeout: 10000 }).catch(() => {});
+        await p.waitForTimeout(1000);
+        const s = await shown(p);
+        const credit = await p.$eval('#credit .accred-text', (el) => el.textContent).catch(() => null);
+        check('demo runs on a preview URL', !s.form && s.found && s.note === NOTE && credit === creditText(TABS[0], DEMO_MATCHES, creditLink(DEMO_ID)) && calls.length === 0, JSON.stringify({ s, credit, calls }));
+        await p.context().close();
+      }
+
+      // Production hosts: ?demo is ignored, nothing fake shows, and the
+      // normal flow still runs (a real upload through the local Worker).
+      for (const host of ['copyrighttester.real.audio', 'real-audio-moonshots.spencerrwilson.workers.dev']) {
+        for (const state of ['found', 'none']) {
+          const p = await newPage({ width: 1280, height: 1000 });
+          await asHost(p, host);
+          const calls = apiCalls(p);
+          await p.goto(`https://${host}/music/?demo=${state}`);
+          await p.evaluate(() => document.fonts.ready);
+          await p.waitForTimeout(1000);
+          const s = await shown(p);
+          const fake = await p.evaluate(() => /fixture|not real|DEMO000000|Demo preview/.test(document.body.innerText));
+          check(`demo=${state} is ignored on ${host}`, s.form && !s.found && !s.none && s.note === null && !fake && calls.length === 0, JSON.stringify({ s, fake, calls }));
+          if (state === 'found' && two) {
+            await p.setInputFiles('#file', join(videosDir, two.file));
+            await p.click('#submit');
+            await p.waitForFunction(() => !document.getElementById('found').hidden || !document.getElementById('none').hidden || document.getElementById('form-error').textContent, null, { timeout: 300000 });
+            const id = await p.getAttribute('#found', 'data-scan-id');
+            const titles = await p.$$eval('#found-tracks .track-title', (els) => els.map((el) => el.textContent));
+            check(`the normal flow runs on ${host} with ?demo=found`,
+              /^[0-9A-Za-z]{10}$/.test(id || '') && id !== DEMO_ID && calls.some((c) => c.startsWith('POST ') && c.endsWith('/api/scan'))
+              && titles.join('|') === two.expect.map((e) => e.title).join('|'), JSON.stringify({ id, titles, calls: calls.length }));
+          }
+          await p.context().close();
+        }
+      }
+    }
 
     // 2b. Slow paths behind the queue (synthetic harness): the page shows
     // "Still working…", never an error or a timeout, then the right result;
@@ -345,7 +665,7 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
         let got = [];
         let ok = false;
         if (await p.isVisible('#found')) {
-          const id = (await p.getAttribute('#open-result', 'href')).split('/v/')[1];
+          const id = await p.getAttribute('#found', 'data-scan-id');
           const scan = await (await p.request.get(`${origin}/api/scans/${id}`)).json();
           got = scan.matches.map((m) => [m.title, m.start_s]);
           ok = judge(two, true, scan.matches);
@@ -405,10 +725,11 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       }
     }
 
-    // 3. Browser requests: this site, or production Tracks GETs (routed locally).
+    // 3. Browser requests: this site (also when served under another name by
+    // the demo checks), or production Tracks GETs (routed locally).
     const bad = browserRequests.filter(({ method, url }) => {
       const u = new URL(url);
-      if (u.origin === origin) return false;
+      if (u.origin === origin || (u.protocol === 'https:' && servedLocally.has(u.host))) return false;
       return !(u.host === PROD_HOST && method === 'GET' && url.startsWith(PROD_TRACKS_PREFIX));
     });
     const hosts = [...new Set(browserRequests.map((r) => new URL(r.url).host))];

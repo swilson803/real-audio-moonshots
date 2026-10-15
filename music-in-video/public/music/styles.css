@@ -349,3 +349,116 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
   .play-btn { padding: 6px 10px; }
   .play-word { display: none; }
 }
+
+/* ── MS-007 Reject 1 (local) ──────────────────────────────────────────── */
+
+/* Results lead in brand red on the upload page (the /v/ page is unchanged). */
+#found-summary,
+#none .result-lead { color: var(--color-red); }
+
+/* Two-step guide (Reject 3): both buttons wear the same frame (the search
+   frame FIND MY MUSIC already has, same slice and width). Until a usable video
+   is chosen, CHOOSE VIDEO is brand red and FIND MY MUSIC brand black; then they
+   swap: VIDEO CHOSEN black, FIND MY MUSIC red (app.js sets .is-chosen). */
+.check-form .file-pick {
+  border-image-source: url('brand-assets/frames/frame-search-heavy-red.webp');
+  border-image-slice: 210;
+  border-width: 15px;
+}
+.check-form .my-login-buttons .btn-primary-cta {
+  color: var(--color-black);
+  border-image-source: url('brand-assets/frames/frame-search-heavy-black.webp') !important;
+}
+.check-form.is-chosen .file-pick {
+  color: var(--color-black);
+  border-image-source: url('brand-assets/frames/frame-search-heavy-black.webp');
+}
+.check-form.is-chosen .my-login-buttons .btn-primary-cta {
+  color: var(--color-red);
+  border-image-source: url('brand-assets/frames/frame-search-heavy-red.webp') !important;
+}
+
+/* FIND MY MUSIC always on top of the (transformed) file field, and on one
+   line on the narrowest phones (at 281 it wrapped to two). */
+.my-login-buttons { position: relative; z-index: 1; }
+@media (max-width: 359px) {
+  .my-login-buttons .btn-primary-cta { white-space: nowrap; padding-left: 12px; padding-right: 12px; }
+  .actions .btn-primary-cta { white-space: nowrap; padding-left: 20px; padding-right: 20px; }
+  /* More room for the track names (both pages). */
+  #found-tracks-box, #tracks-box { padding: 6px; }
+  .track { column-gap: 8px; }
+}
+/* Track names wrap between words; a word is only broken if it can't fit. */
+.track-title, .track-artist { overflow-wrap: break-word; word-break: normal; }
+
+/* Credit block (credit.js): real-audio-creator AccreditationSection layout —
+   heading mb-2, tab row, panel mt-3 with gap-2. */
+.credit { text-align: left; }
+.credit-heading { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--color-black); margin-bottom: 8px; }
+/* CF-040's tab row: wraps at every width; below 640px the tabs spread across
+   the row (justify-between) with 12px between rows to clear the frame
+   outset; from 640px they sit left with 10px gaps. */
+.credit-tabs { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 0; }
+@media (min-width: 640px) { .credit-tabs { justify-content: flex-start; gap: 10px; } }
+.credit-panel { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.credit-where { font-family: var(--font-display); font-size: 16px; color: var(--color-black); }
+
+/* COPIED from real-audio-creator src/index.css @145d66d (.accred-tab,
+   .download-accred), asset URLs relative. */
+.accred-tab {
+  border-style: solid;
+  border-image-source: url('brand-assets/frames/frame-button-heavy-black.webp');
+  border-image-slice: 120;
+  border-image-outset: 5px;
+  border-image-repeat: stretch;
+  border-width: 7px;
+  background: transparent;
+  transition: border-image-source 120ms ease, color 120ms ease;
+}
+.accred-tab[data-state='active'] {
+  border-image-source: url('brand-assets/frames/frame-button-heavy-red.webp');
+}
+.download-accred {
+  border-image-source: url('brand-assets/frames/frame-card-light-black.webp');
+  border-image-slice: 100;
+  border-image-repeat: stretch;
+  border-style: solid;
+  border-width: 14px;
+  cursor: pointer;
+  transition: border-image-source 150ms ease;
+}
+.download-accred:hover,
+.download-accred[data-copied='true'] {
+  border-image-source: url('brand-assets/frames/frame-card-light-red.webp');
+}
+
+/* The Tailwind utilities on those elements in AccreditationSection.tsx. */
+.accred-tab {
+  font-family: var(--font-display); font-size: 12px; line-height: 1; color: var(--color-black);
+  padding: 2px 2px; white-space: nowrap; cursor: pointer; margin: 0;
+}
+.accred-tab[data-state='active'] { color: var(--color-red); }
+.accred-tab:focus-visible { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; }
+@media (min-width: 640px) { .accred-tab { font-size: 14px; padding: 2px 4px; } }
+.download-accred {
+  position: relative; display: block; width: 100%; overflow: hidden; text-align: left;
+  background: transparent; padding: 0; margin: 0; font: inherit; color: var(--color-black);
+}
+.download-accred:focus-visible { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; }
+.accred-text {
+  display: flex; min-height: 32px; align-items: center; white-space: pre-wrap; overflow-wrap: break-word;
+  font-family: var(--font-body); font-size: 14px; line-height: 1.375; transition: opacity 150ms;
+}
+@media (min-width: 640px) { .accred-text { font-size: 16px; } }
+/* The link credit: the URL may break anywhere so it never clips (CF-040 wrapLink). */
+.accred-text--link { overflow-wrap: anywhere; }
+.accred-overlay {
+  pointer-events: none; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(229, 90, 60, 0.8); color: #FFF9F0; font-family: var(--font-display); font-size: 24px; font-weight: 700;
+  opacity: 0; transition: opacity 150ms;
+}
+.download-accred:hover .accred-text,
+.download-accred[data-copied='true'] .accred-text { opacity: 0; }
+.download-accred:hover .accred-overlay,
+.download-accred[data-copied='true'] .accred-overlay { opacity: 1; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
