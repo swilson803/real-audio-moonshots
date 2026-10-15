@@ -1,38 +1,50 @@
-// The credit block on the upload page (MS-007 Reject 1): "Where are you
-// posting?", a tab per platform, and the credit box that IS the copy action.
-// It mirrors real-audio-creator's download-modal AccreditationSection
-// (src/components/AccreditationSection.tsx @145d66d) as plain DOM: same tabs,
-// strings and copy behaviour. The credit text follows that site's
-// buildCredit (supabase/functions/_shared/accreditation.ts) per track, with
-// two differences: the link is this scan's /v/<id> short link (one link for
-// every track; /t/<code> links need a production download), and the
-// short-form credits end with Real Audio's tag on that platform. moonshots
-// has no platform sound URLs or artist handles, so every tab is the
-// paste-a-credit branch (no "Open sound on …" button or sound notes).
+// The credit block on the upload page (MS-007): "Where are you posting?", a
+// tab per platform, and the credit box that IS the copy action. It mirrors
+// real-audio-creator's AccreditationSection as plain DOM: same tabs, strings
+// and copy behaviour. The credit text follows that site's one-link credit
+// system (CF-040, supabase/functions/_shared/accreditation.ts @c43a043),
+// where a whole video's music is credited by one link, as its stacks are:
+//   description (YT / FB / X / Twitch): one line, CREDIT_PREFIX + the link
+//     (buildStackCredit). Our one link is this scan's /v/<id> page, which
+//     lists every track; always on the production host, as CF-040's credit
+//     links always point at library.real.audio.
+//   short (TikTok / Instagram / YouTube Shorts): "music from @<Real Audio's
+//     handle there> - " then "<track> <artist>" per track, comma-separated
+//     (buildStackShortCredit). moonshots has no artist handles, so <artist>
+//     is always the artist's name (CF-040's fallback).
+// No sound branch (CF-040: a post carries one sound, not a set of them).
 //
-// The pure part (TABS, CREDIT_LOCATION, creditText) touches no DOM, so the
-// unit tests import it in Node.
+// The pure part (TABS, CREDIT_LOCATION, creditLink, creditText) touches no
+// DOM, so the unit tests import it in Node.
+
+// CF-040's REAL_AUDIO_HANDLES (note the zero in YouTube's).
+export const REAL_AUDIO_HANDLES = { tiktok: 'r3al_audio', instagram: 'r3al.audio', youtube: 'r3al.audi0' };
 
 export const TABS = [
   { value: 'universal', label: 'YT / FB / X / Twitch', medium: 'description' },
-  { value: 'tiktok', label: 'TikTok', medium: 'short', tag: '@r3al_audio' },
-  { value: 'instagram', label: 'Instagram', medium: 'short', tag: '@r3al.audio' },
-  { value: 'youtube_shorts', label: 'YouTube Shorts', medium: 'short', tag: '@r3al.audi0' },
+  { value: 'tiktok', label: 'TikTok', medium: 'short', handle: REAL_AUDIO_HANDLES.tiktok },
+  { value: 'instagram', label: 'Instagram', medium: 'short', handle: REAL_AUDIO_HANDLES.instagram },
+  { value: 'youtube_shorts', label: 'YouTube Shorts', medium: 'short', handle: REAL_AUDIO_HANDLES.youtube },
 ];
 
 // Where the creator pastes the credit, per medium (main's CREDIT_LOCATION).
 export const CREDIT_LOCATION = { description: 'description', short: 'caption' };
 
-// -> the credit text for one tab: a line per track (first appearance, video
-// order; a track heard twice is credited once), then the link (description)
-// or the platform tag at the end of the last line (short).
+// CF-040's CREDIT_PREFIX: the description credit is this, then one link.
+export const CREDIT_PREFIX = 'music in this video: ';
+
+// The scan's credit link: always the production host, wherever the page runs.
+export const CREDIT_ORIGIN = 'https://copyrighttester.real.audio';
+export const creditLink = (id) => `${CREDIT_ORIGIN}/v/${id}`;
+
+// -> the credit text for one tab. Tracks in video order, each once (a track
+// heard twice is credited at its first appearance).
 export function creditText(tab, matches, link) {
+  if (tab.medium === 'description') return `${CREDIT_PREFIX}${link}`;
   const seen = new Set();
-  const tracks = matches.filter((m) => !seen.has(m.track_id) && seen.add(m.track_id));
-  if (tab.medium === 'description') {
-    return [...tracks.map((t) => `Music: "${t.title}" by ${t.artist}`), link].join('\n');
-  }
-  return `${tracks.map((t) => `${t.title} ${t.artist} [real.audio]`).join('\n')} ${tab.tag}`;
+  const pairs = matches.filter((m) => !seen.has(m.track_id) && seen.add(m.track_id)).map((t) => `${t.title} ${t.artist}`);
+  const lead = `music from @${tab.handle}`;
+  return pairs.length ? `${lead} - ${pairs.join(', ')}` : lead;
 }
 
 // Synchronous copy via a hidden textarea, inside the click gesture (main's
@@ -68,10 +80,10 @@ const el = (tag, className, text) => {
 // overlay on hover; a click flips it to "Copied!" at once (not waiting on the
 // clipboard), held for at least 2 s and, while the pointer is still on the
 // box, until it leaves.
-function copyBlock(text) {
+function copyBlock(text, wrapLink) {
   const box = el('button', 'download-accred');
   box.type = 'button';
-  const shown = el('span', 'accred-text', text);
+  const shown = el('span', wrapLink ? 'accred-text accred-text--link' : 'accred-text', text);
   const overlay = el('span', 'accred-overlay', 'Copy');
   overlay.setAttribute('aria-hidden', 'true');
   const status = el('span', 'sr-only');
@@ -143,7 +155,7 @@ export function mountCredit(root, matches, link) {
     panel.dataset.value = tab.value;
     panel.replaceChildren(
       el('p', 'credit-where', `Paste in your ${CREDIT_LOCATION[tab.medium]}:`),
-      copyBlock(creditText(tab, matches, link)),
+      copyBlock(creditText(tab, matches, link), tab.medium === 'description'),
     );
   };
 

@@ -6,8 +6,9 @@
 //    nothing extra; no-music videos get the no-match message and no link);
 //    what was sent must be the soundtrack body (body.js), never the video;
 //  - the two-track and no-music videos are re-run at 281 / 320 / 375 / 768 /
-//    1280 for screenshots, overflow, the step frames (VIDEO CHOSEN thin, FIND
-//    MY MUSIC thick), FIND MY MUSIC never covered, the red results lines, the
+//    1280 for screenshots, overflow, the two buttons (same frame; CHOOSE
+//    VIDEO red / FIND MY MUSIC black, then VIDEO CHOSEN black / FIND MY MUSIC
+//    red), FIND MY MUSIC never covered, the red results lines, the
 //    credit block (per-platform tabs, text, copy: one tap on phones), the
 //    found tracks under it, "check another video", and the /v/ page (rows,
 //    Play, its copy line);
@@ -26,7 +27,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { CREDIT_LOCATION, TABS, creditText } from '../public/music/credit.js';
+import { CREDIT_LOCATION, TABS, creditLink, creditText } from '../public/music/credit.js';
 
 const require = createRequire(import.meta.url);
 const run = promisify(execFile);
@@ -243,14 +244,13 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
     await page.context().close();
 
     // 2. UI at 281 / 320 / 375 / 768 / 1280 with the two-track and no-music
-    // videos (MS-007 Reject 1): step frames, FIND MY MUSIC never covered,
+    // videos (MS-007 Rejects 1 and 3): the two buttons' red / black swap on
+    // one frame, FIND MY MUSIC never covered,
     // the red results lines, the credit block (tabs, text, copy), the found
     // tracks under it, "check another video", then the /v/ page as before.
     const two = videos.find((v) => v.kind === 'two_tracks');
     const none = videos.find((v) => v.kind === 'no_music');
     const RED = 'rgb(229, 90, 60)';
-    const host = new URL(origin).host;
-    const frameOf = (page, sel) => page.$eval(sel, (el) => getComputedStyle(el).borderImageSource.match(/frame-[\w-]+/)?.[0] ?? null);
     const rectOf = (page, sel) => page.$eval(sel, (el) => { const r = el.getBoundingClientRect(); return [r.x, r.y + scrollY, r.width, r.height].map(Math.round).join(','); });
     // A 3x3 grid on FIND MY MUSIC: every point must hit it (or its text).
     const submitHits = (page) => page.evaluate(() => {
@@ -264,10 +264,21 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       }
       return miss;
     });
+    // Reject 3: both buttons wear the same frame (image family, slice and
+    // width); red then black before a video, black then red after one.
+    const BLACK = 'rgb(26, 26, 26)';
+    const look = (page) => page.evaluate(() => Object.fromEntries(['file-pick', 'submit'].map((id) => {
+      const cs = getComputedStyle(document.getElementById(id));
+      return [id, { color: cs.color, frame: cs.borderImageSource.match(/frame-[\w-]+/)?.[0] ?? null, width: cs.borderTopWidth, slice: cs.borderImageSlice }];
+    })));
     const steps = async (page, chosen) => {
-      const pick = await frameOf(page, '#file-pick');
-      const cta = await frameOf(page, '#submit');
-      return chosen ? pick === 'frame-button-light-red' && cta === 'frame-search-heavy-red' : pick === 'frame-button-heavy-red' && cta === 'frame-search-light-red';
+      const l = await look(page);
+      const pick = l['file-pick'];
+      const cta = l.submit;
+      const red = (b) => b.color === RED && b.frame === 'frame-search-heavy-red';
+      const black = (b) => b.color === BLACK && b.frame === 'frame-search-heavy-black';
+      const same = pick.width === cta.width && pick.slice === cta.slice;
+      return { ok: same && (chosen ? black(pick) && red(cta) : red(pick) && black(cta)), detail: JSON.stringify(l) };
     };
     const settle = (page) => page.waitForTimeout(250); // the 120-150 ms frame / overlay transitions
     for (const width of [281, 320, 375, 768, 1280]) {
@@ -280,7 +291,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       await p.screenshot({ path: `${shotsDir}/upload-rest-${width}.png`, fullPage: true });
       check(`upload page fits ${width}`, await noOverflow(p));
       check(`upload page hint at ${width}`, (await p.textContent('#file-hint')).trim() === 'MP4, MOV, M4V or WebM, up to 20 minutes. Only the soundtrack is sent, and it’s deleted once checked.');
-      check(`before a video: CHOOSE VIDEO thick, FIND MY MUSIC thin at ${width}`, await steps(p, false), `${await frameOf(p, '#file-pick')} / ${await frameOf(p, '#submit')}`);
+      let st = await steps(p, false);
+      check(`before a video: CHOOSE VIDEO red, FIND MY MUSIC black, same frame at ${width}`, st.ok, st.detail);
       const ctaHeight = await p.$eval('#submit', (el) => el.getBoundingClientRect().height);
       check(`FIND MY MUSIC on one line at ${width}`, ctaHeight <= 72, `${ctaHeight}px`);
       let miss = await submitHits(p);
@@ -290,7 +302,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       await p.setInputFiles('#file', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a video') });
       await settle(p);
       await p.screenshot({ path: `${shotsDir}/upload-invalid-${width}.png`, fullPage: true });
-      check(`an unusable file keeps the frames (and shows why) at ${width}`, (await steps(p, false)) && (await p.textContent('#file-error')).includes('isn’t supported'));
+      st = await steps(p, false);
+      check(`an unusable file keeps CHOOSE red / FIND black (and shows why) at ${width}`, st.ok && (await p.textContent('#file-error')).includes('isn’t supported'), st.detail);
       miss = await submitHits(p);
       check(`FIND MY MUSIC not covered, error line, at ${width}`, !miss.length, miss.join(' '));
 
@@ -299,7 +312,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
         await settle(p);
         await p.mouse.move(0, 0);
         await p.screenshot({ path: `${shotsDir}/upload-chosen-${width}.png`, fullPage: true });
-        check(`video chosen: VIDEO CHOSEN thin, FIND MY MUSIC thick at ${width}`, (await steps(p, true)) && (await p.textContent('#file-pick')).trim() === 'VIDEO CHOSEN', `${await frameOf(p, '#file-pick')} / ${await frameOf(p, '#submit')}`);
+        st = await steps(p, true);
+        check(`video chosen: VIDEO CHOSEN black, FIND MY MUSIC red, same frame at ${width}`, st.ok && (await p.textContent('#file-pick')).trim() === 'VIDEO CHOSEN', st.detail);
         const after = [await rectOf(p, '#file-pick'), await rectOf(p, '#submit')];
         // The file name line under the button can change the CTA's y; its
         // x, width and height must not move.
@@ -359,7 +373,7 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
             && tabs.map((t) => t.label).join('|') === TABS.map((t) => t.label).join('|')
             && tabs.map((t) => t.selected).join('|') === 'true|false|false|false', JSON.stringify(tabs));
           const shortName = { universal: 'yt', tiktok: 'tiktok', instagram: 'instagram', youtube_shorts: 'shorts' };
-          const creditLink = `${host}/v/${id}`;
+          const link1 = creditLink(id);
           for (const t of TABS) {
             await press(p, `#credit-tab-${t.value}`);
             await p.mouse.move(0, 0);
@@ -369,7 +383,7 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
               text: document.querySelector('#credit .accred-text').textContent,
               selected: document.querySelector('#credit [aria-selected="true"]').dataset.value,
             }));
-            const want = creditText(t, scan.matches, creditLink);
+            const want = creditText(t, scan.matches, link1);
             check(`${t.label} tab: "Paste in your ${CREDIT_LOCATION[t.medium]}:" and its credit at ${width}`,
               got.selected === t.value && got.where === `Paste in your ${CREDIT_LOCATION[t.medium]}:` && got.text === want, JSON.stringify(got));
             check(`${t.label} tab fits ${width}`, await noOverflow(p));
@@ -399,7 +413,7 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
             await press(p, '#credit .download-accred');
             const t1 = Date.now();
             const clip = await p.evaluate(() => navigator.clipboard.readText());
-            const want = creditText(t, scan.matches, creditLink);
+            const want = creditText(t, scan.matches, link1);
             check(`${t.label} credit copies in one ${mobile ? 'tap' : 'click'} at ${width}`, clip === want, JSON.stringify(clip));
             await settle(p);
             const st = await p.$eval('#credit .download-accred', (el) => ({ label: el.getAttribute('aria-label'), copied: el.dataset.copied, overlay: el.querySelector('.accred-overlay').textContent, status: el.querySelector('[role="status"]').textContent }));
@@ -538,7 +552,7 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
             const want = {
               summary: 'We found 2 Real Audio tracks in your video.',
               id: DEMO_ID,
-              credit: creditText(TABS[0], DEMO_MATCHES, `${new URL(origin).host}/v/${DEMO_ID}`),
+              credit: creditText(TABS[0], DEMO_MATCHES, creditLink(DEMO_ID)),
               rows: ['0:04 Demo Track One (fixture) / Demo Artist (not real)', '0:40 Demo Track Two (fixture) / Another Demo Artist (not real)'],
             };
             check(`demo=found shows the fixture tracks and credit at ${width}`, JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got));
@@ -584,7 +598,7 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
         await p.waitForTimeout(1000);
         const s = await shown(p);
         const credit = await p.$eval('#credit .accred-text', (el) => el.textContent).catch(() => null);
-        check('demo runs on a preview URL', !s.form && s.found && s.note === NOTE && credit === creditText(TABS[0], DEMO_MATCHES, `${host}/v/${DEMO_ID}`) && calls.length === 0, JSON.stringify({ s, credit, calls }));
+        check('demo runs on a preview URL', !s.form && s.found && s.note === NOTE && credit === creditText(TABS[0], DEMO_MATCHES, creditLink(DEMO_ID)) && calls.length === 0, JSON.stringify({ s, credit, calls }));
         await p.context().close();
       }
 

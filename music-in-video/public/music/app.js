@@ -3,7 +3,7 @@
 // "Still working…" until the result, however long that takes. Shows the
 // per-platform credit (credit.js) and the found tracks (tracks.js).
 import { ExtractError, readSoundtrack } from './extract.js';
-import { mountCredit } from './credit.js';
+import { creditLink, mountCredit } from './credit.js';
 import { renderTracks } from './tracks.js';
 import { DEMO_ID, DEMO_MATCHES, demoAudioUrl, demoState } from './demo.js';
 
@@ -51,8 +51,8 @@ fileInput.addEventListener('change', () => {
   filePickLabel.textContent = file ? 'VIDEO CHOSEN' : 'CHOOSE VIDEO';
   const err = file ? validate(file) : null;
   fileError.textContent = err || '';
-  // Guide the creator: once a usable video is chosen, its frame goes thin
-  // and FIND MY MUSIC's goes thick (styles.css .check-form.is-chosen).
+  // Guide the creator: once a usable video is chosen, its button goes brand
+  // black and FIND MY MUSIC brand red (styles.css .check-form.is-chosen).
   form.classList.toggle('is-chosen', Boolean(file) && !err);
 });
 
@@ -64,9 +64,8 @@ function showResult(result) {
   }
   const n = result.matches.length;
   $('found-summary').textContent = `We found ${n} Real Audio track${n === 1 ? '' : 's'} in your video.`;
-  // The scan's short link, written without the scheme as the main site's
-  // description credit is (library.real.audio/t/<code>).
-  const link = `${location.host}/v/${result.id}`;
+  // The one credit link for the whole video (credit.js).
+  const link = creditLink(result.id);
   $('found').dataset.scanId = result.id;
   mountCredit($('credit'), result.matches, link);
   renderTracks($('found-tracks'), result.matches);

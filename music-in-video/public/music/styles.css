@@ -356,18 +356,26 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
 #found-summary,
 #none .result-lead { color: var(--color-red); }
 
-/* Two-step guide: the video button's frame is thick and FIND MY MUSIC's thin
-   until a usable video is chosen, then they swap (app.js sets .is-chosen).
-   The light frames are the same size as the heavy ones, so only the image
-   changes (same slice and width: nothing moves). */
-.check-form .my-login-buttons .btn-primary-cta {
-  border-image-source: url('brand-assets/frames/frame-search-light-red.webp') !important;
+/* Two-step guide (Reject 3): both buttons wear the same frame (the search
+   frame FIND MY MUSIC already has, same slice and width). Until a usable video
+   is chosen, CHOOSE VIDEO is brand red and FIND MY MUSIC brand black; then they
+   swap: VIDEO CHOSEN black, FIND MY MUSIC red (app.js sets .is-chosen). */
+.check-form .file-pick {
+  border-image-source: url('brand-assets/frames/frame-search-heavy-red.webp');
+  border-image-slice: 210;
+  border-width: 15px;
 }
-.check-form.is-chosen .my-login-buttons .btn-primary-cta {
-  border-image-source: url('brand-assets/frames/frame-search-heavy-red.webp') !important;
+.check-form .my-login-buttons .btn-primary-cta {
+  color: var(--color-black);
+  border-image-source: url('brand-assets/frames/frame-search-heavy-black.webp') !important;
 }
 .check-form.is-chosen .file-pick {
-  border-image-source: url('brand-assets/frames/frame-button-light-red.webp');
+  color: var(--color-black);
+  border-image-source: url('brand-assets/frames/frame-search-heavy-black.webp');
+}
+.check-form.is-chosen .my-login-buttons .btn-primary-cta {
+  color: var(--color-red);
+  border-image-source: url('brand-assets/frames/frame-search-heavy-red.webp') !important;
 }
 
 /* FIND MY MUSIC always on top of the (transformed) file field, and on one
@@ -387,14 +395,13 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
    heading mb-2, tab row, panel mt-3 with gap-2. */
 .credit { text-align: left; }
 .credit-heading { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--color-black); margin-bottom: 8px; }
-.credit-tabs { display: flex; flex-wrap: wrap; gap: 10px; }
+/* CF-040's tab row: wraps at every width; below 640px the tabs spread across
+   the row (justify-between) with 12px between rows to clear the frame
+   outset; from 640px they sit left with 10px gaps. */
+.credit-tabs { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 0; }
+@media (min-width: 640px) { .credit-tabs { justify-content: flex-start; gap: 10px; } }
 .credit-panel { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .credit-where { font-family: var(--font-display); font-size: 16px; color: var(--color-black); }
-/* Main keeps the four tabs on one row inside its modal; below 400px they
-   don't fit here, so they sit two by two. */
-@media (max-width: 399px) {
-  .credit-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
-}
 
 /* COPIED from real-audio-creator src/index.css @145d66d (.accred-tab,
    .download-accred), asset URLs relative. */
@@ -439,10 +446,12 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
 }
 .download-accred:focus-visible { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; }
 .accred-text {
-  display: flex; min-height: 32px; align-items: center; white-space: pre-wrap; overflow-wrap: anywhere;
+  display: flex; min-height: 32px; align-items: center; white-space: pre-wrap; overflow-wrap: break-word;
   font-family: var(--font-body); font-size: 14px; line-height: 1.375; transition: opacity 150ms;
 }
 @media (min-width: 640px) { .accred-text { font-size: 16px; } }
+/* The link credit: the URL may break anywhere so it never clips (CF-040 wrapLink). */
+.accred-text--link { overflow-wrap: anywhere; }
 .accred-overlay {
   pointer-events: none; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: rgba(229, 90, 60, 0.8); color: #FFF9F0; font-family: var(--font-display); font-size: 24px; font-weight: 700;
