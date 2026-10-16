@@ -385,7 +385,7 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
   .my-login-buttons .btn-primary-cta { white-space: nowrap; padding-left: 12px; padding-right: 12px; }
   .actions .btn-primary-cta { white-space: nowrap; padding-left: 20px; padding-right: 20px; }
   /* More room for the track names (both pages). */
-  #found-tracks-box, #tracks-box { padding: 6px; }
+  #tracks-box { padding: 6px; }
   .track { column-gap: 8px; }
 }
 /* Track names wrap between words; a word is only broken if it can't fit. */
@@ -462,3 +462,25 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
 .download-accred:hover .accred-overlay,
 .download-accred[data-copied='true'] .accred-overlay { opacity: 1; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* ── MS-007 Reject 4 (local) ──────────────────────────────────────────── */
+
+/* The post-scan result sits in one light sketched card (.box-sketched-light,
+   as the /v/ track list) so it doesn't float: the summary, the credit block
+   and the found tracks, each a section separated by a faint SketchDivider
+   (.sketch-divider.divider-quiet, as between track rows). Every section
+   shares the card's inner edge and the same space above and below each
+   divider. */
+.result-card { padding: 16px 20px; }
+@media (min-width: 640px) { .result-card { padding: 20px 28px; } }
+@media (max-width: 359px) { .result-card { padding: 10px 8px; border-width: 12px; } }
+.result-card > * + * { margin-top: 20px; }
+.result-divider { width: 100%; }
+/* The credit box draws its line ~12px inside its 14px frame (2px from its
+   text): pull the box out by its frame so its text starts on the same edge as
+   everything else, and in by the empty 12px below the line so the visible gap
+   to the next divider matches the others. */
+.result-card .download-accred { margin: 0 -14px -12px; width: calc(100% + 28px); }
+.result-tracks .credit-heading { margin-bottom: 4px; }
+/* The track rows end at the card's edge, like the credit above them. */
+.result-tracks .tracks > .track:last-child { padding-bottom: 0; }

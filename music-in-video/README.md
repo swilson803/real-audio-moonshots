@@ -12,7 +12,8 @@ upload page's result (`public/music/credit.js`): a tab per platform
 copies in one tap, then the found tracks. The credit text follows the main
 site's one-link system (CF-040): `music in this video: https://copyrighttester.real.audio/v/<id>`
 for descriptions, `music from @<Real Audio's handle> - <track> <artist>, …`
-for short-form captions.
+for short-form captions. The result (summary, credit block, found tracks)
+sits in one light sketched card, its sections split by faint dividers.
 
 Shares one Worker, `real-audio-moonshots`, and its domain
 (copyrighttester.real.audio) with the clearance check:
