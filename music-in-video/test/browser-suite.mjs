@@ -8,10 +8,11 @@
 //  - the two-track and no-music videos are re-run at 281 / 320 / 375 / 768 /
 //    1280 for screenshots, overflow, the two buttons (same frame; CHOOSE
 //    VIDEO red / FIND MY MUSIC black, then VIDEO CHOSEN black / FIND MY MUSIC
-//    red), FIND MY MUSIC never covered, the red results lines, the
-//    credit block (per-platform tabs, text, copy: one tap on phones), the
-//    found tracks under it, "check another video", and the /v/ page (rows,
-//    Play, its copy line);
+//    red), FIND MY MUSIC never covered, the red results lines, the result
+//    card (light outline; summary, credit and tracks split by faint dividers,
+//    on one left edge, evenly spaced), the credit block (per-platform tabs,
+//    text, copy: one tap on phones), the found tracks under it, "check
+//    another video", and the /v/ page (rows, Play, its copy line);
 //  - the preview-only demo mode (?demo=found / none) shows fixtures with no
 //    /api/ request on allowed hosts and is ignored on the production hosts;
 //  - the header on both pages is plain brand type (DOM + one-colour pixels);
@@ -244,8 +245,9 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
     await page.context().close();
 
     // 2. UI at 281 / 320 / 375 / 768 / 1280 with the two-track and no-music
-    // videos (MS-007 Rejects 1 and 3): the two buttons' red / black swap on
-    // one frame, FIND MY MUSIC never covered,
+    // videos (MS-007 Rejects 1, 3 and 4): the two buttons' red / black swap
+    // on one frame, FIND MY MUSIC never covered, the result card (light
+    // outline, faint dividers, one edge, even spacing),
     // the red results lines, the credit block (tabs, text, copy), the found
     // tracks under it, "check another video", then the /v/ page as before.
     const two = videos.find((v) => v.kind === 'two_tracks');
@@ -271,6 +273,37 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       const cs = getComputedStyle(document.getElementById(id));
       return [id, { color: cs.color, frame: cs.borderImageSource.match(/frame-[\w-]+/)?.[0] ?? null, width: cs.borderTopWidth, slice: cs.borderImageSlice }];
     })));
+    // The result card's frame, its sections in order (dividers marked), the
+    // left edge of each section's content, and the gaps between sections.
+    const cardLayout = (page, sel) => page.$eval(sel, (card) => {
+      const cs = getComputedStyle(card);
+      const r = (el) => el.getBoundingClientRect();
+      const kids = [...card.children];
+      const x = (q) => { const el = card.querySelector(q); return el ? Math.round(r(el).left) : null; };
+      const gaps = [];
+      for (let i = 1; i < kids.length; i++) gaps.push(Math.round(r(kids[i]).top - r(kids[i - 1]).bottom));
+      return {
+        frame: cs.borderImageSource.match(/frame-[\w-]+/)?.[0] ?? null,
+        borderStyle: cs.borderTopStyle,
+        border: cs.borderTopWidth,
+        sections: kids.map((el) => (el.classList.contains('sketch-divider') ? 'divider' : el.id)),
+        dividers: kids.filter((el) => el.classList.contains('sketch-divider')).map((el) => ({
+          line: /line-thin-black/.test(getComputedStyle(el).backgroundImage),
+          opacity: Number(getComputedStyle(el).opacity),
+          height: Math.round(r(el).height * 10) / 10,
+        })),
+        edges: {
+          summary: Math.round(r(kids[0]).left),
+          heading: x('#credit .credit-heading'),
+          tabs: x('#credit .accred-tab'),
+          where: x('#credit .credit-where'),
+          copyText: x('#credit .accred-text'),
+          tracksHeading: x('#found-tracks-box .credit-heading'),
+          trackTime: x('#found-tracks .track-time'),
+        },
+        gaps,
+      };
+    });
     const steps = async (page, chosen) => {
       const l = await look(page);
       const pick = l['file-pick'];
@@ -347,8 +380,19 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
           const n = two.expect.length;
           check(`found line in brand red at ${width}`,
             (await p.textContent('#found-summary')) === `We found ${n} Real Audio tracks in your video.` && (await p.$eval('#found-summary', (el) => getComputedStyle(el).color)) === RED);
+          // Reject 4: one light-outline card holds the summary, the credit
+          // and the tracks, with a faint divider between sections; every
+          // section starts on the same edge, with the same gap around each
+          // divider; the button sits under the card.
           const order = await p.evaluate(() => [...document.querySelectorAll('#found > *')].map((el) => el.id || el.className));
-          check(`found: summary, credit, tracks, then the button at ${width}`, order.join('|') === 'found-summary|credit|found-tracks-box|actions', order.join('|'));
+          const card = await cardLayout(p, '#found-card');
+          check(`found: one card, then the button at ${width}`, order.join('|') === 'found-card|actions', order.join('|'));
+          check(`result card has a light outline at ${width}`, card.frame === 'frame-card-light-black' && card.borderStyle === 'solid' && parseFloat(card.border) >= 12, JSON.stringify(card));
+          check(`result card sections: summary, divider, credit, divider, tracks at ${width}`,
+            card.sections.join('|') === 'found-summary|divider|credit|divider|found-tracks-box' && card.dividers.every((d) => d.line && d.opacity <= 0.2 && d.height > 0), JSON.stringify({ sections: card.sections, dividers: card.dividers }));
+          const edges = Object.values(card.edges);
+          check(`result sections share one left edge at ${width}`, edges.every((x) => x !== null && Math.abs(x - edges[0]) <= 1), JSON.stringify(card.edges));
+          check(`result sections evenly spaced at ${width}`, card.gaps.length === 4 && Math.max(...card.gaps) - Math.min(...card.gaps) <= 1, JSON.stringify(card.gaps));
           const another = await p.$eval('#found .actions', (el) => ({
             n: el.children.length, cls: el.firstElementChild.className, text: el.textContent.trim(), href: el.firstElementChild.getAttribute('href'),
           }));
@@ -488,6 +532,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
         await p.screenshot({ path: `${shotsDir}/none-${width}.png`, fullPage: true });
         const lead = await p.$eval('#none .result-lead', (el) => ({ text: el.textContent, color: getComputedStyle(el).color }));
         const nbtn = await p.$eval('#none .actions .btn-primary-cta', (el) => ({ text: el.textContent, color: getComputedStyle(el).color }));
+        const noneCard = await p.$eval('#none-card', (el) => ({ frame: getComputedStyle(el).borderImageSource.match(/frame-[\w-]+/)?.[0] ?? null, holdsLead: !!el.querySelector('.result-lead') })).catch(() => null);
+        check(`no-match message in the same light-outline card at ${width}`, noneCard?.frame === 'frame-card-light-black' && noneCard.holdsLead, JSON.stringify(noneCard));
         check(`no-match message in brand red, no link at ${width}`, n.found === false && !n.linkShown && lead.text === 'We didn’t find any Real Audio music in this video.' && lead.color === RED, JSON.stringify(lead));
         check(`no-match "check another video" brand red at ${width}`, nbtn.text === 'check another video' && nbtn.color === RED, JSON.stringify(nbtn));
         check(`no-match state fits ${width}`, await noOverflow(p));

@@ -6,7 +6,7 @@
   <title>Music in this video | Real Audio</title>
   <meta name="description" content="Upload your finished video and get one link that credits the Real Audio music in it.">
   <link rel="icon" href="/music/favicon.ico">
-  <link rel="stylesheet" href="/music/styles.css?v=ms007-r1">
+  <link rel="stylesheet" href="/music/styles.css?v=ms007-r4">
 </head>
 <body>
   <div class="page surface-sketched">
@@ -45,10 +45,15 @@
           </form>
 
           <section class="stack" id="found" hidden>
-            <p class="lead result-lead" id="found-summary"></p>
-            <div class="credit" id="credit"></div>
-            <div class="box-sketched-light" id="found-tracks-box">
-              <ol class="tracks" id="found-tracks"></ol>
+            <div class="box-sketched-light result-card" id="found-card">
+              <p class="lead result-lead" id="found-summary"></p>
+              <div class="sketch-divider divider-quiet result-divider" aria-hidden="true"></div>
+              <div class="credit" id="credit"></div>
+              <div class="sketch-divider divider-quiet result-divider" aria-hidden="true"></div>
+              <div class="result-tracks" id="found-tracks-box">
+                <h3 class="credit-heading">Found tracks</h3>
+                <ol class="tracks" id="found-tracks"></ol>
+              </div>
             </div>
             <div class="actions">
               <a class="btn-primary-cta" href="/music/">check another video</a>
@@ -56,7 +61,9 @@
           </section>
 
           <section class="stack" id="none" hidden>
-            <p class="lead result-lead">We didn’t find any Real Audio music in this video.</p>
+            <div class="box-sketched-light result-card" id="none-card">
+              <p class="lead result-lead">We didn’t find any Real Audio music in this video.</p>
+            </div>
             <div class="actions">
               <a class="btn-primary-cta" href="/music/">check another video</a>
             </div>
@@ -65,6 +72,6 @@
       </div>
     </main>
   </div>
-  <script src="/music/app.js?v=ms007-r1" type="module"></script>
+  <script src="/music/app.js?v=ms007-r4" type="module"></script>
 </body>
 </html>
