@@ -304,6 +304,19 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
         gaps,
       };
     });
+    // Reject 6: [layout height, on-screen height] of a button's frame, and
+    // whether each faint divider in a sketched box runs to the box's drawn
+    // line (~2px inside the frame's inner edge) on both sides.
+    const hgt = (page, sel) => page.$eval(sel, (el) => [Math.round(el.offsetHeight * 10) / 10, Math.round(el.getBoundingClientRect().height * 10) / 10]);
+    const sameH = (...hs) => hs.every((h) => Math.abs(h[0] - hs[0][0]) <= 0.5 && Math.abs(h[1] - hs[0][0]) <= 0.5);
+    const dividerSpan = (page, boxSel) => page.$eval(boxSel, (box) => {
+      const br = box.getBoundingClientRect();
+      const cs = getComputedStyle(box);
+      const inL = br.left + parseFloat(cs.borderLeftWidth);
+      const inR = br.right - parseFloat(cs.borderRightWidth);
+      const lines = [...box.querySelectorAll('.divider-quiet')].map((d) => { const r = d.getBoundingClientRect(); return [Math.round(r.left - inL), Math.round(inR - r.right)]; });
+      return { lines, ok: lines.length > 0 && lines.every(([l, r]) => l >= -3 && l <= -1 && r >= -3 && r <= -1) };
+    });
     const steps = async (page, chosen) => {
       const l = await look(page);
       const pick = l['file-pick'];
@@ -331,6 +344,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       let miss = await submitHits(p);
       check(`FIND MY MUSIC not covered, no video, at ${width}`, !miss.length, miss.join(' '));
       const rects = [await rectOf(p, '#file-pick'), await rectOf(p, '#submit')];
+      const restH = [await hgt(p, '#file-pick'), await hgt(p, '#submit')];
+      check(`CHOOSE VIDEO and FIND MY MUSIC frames the same height at ${width}`, sameH(...restH), JSON.stringify(restH));
 
       await p.setInputFiles('#file', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a video') });
       await settle(p);
@@ -354,8 +369,16 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
         check(`the frame swap moves nothing at ${width}`, rects[0] === after[0] && xwh(rects[1]) === xwh(after[1]), `${rects.join(' ')} -> ${after.join(' ')}`);
         miss = await submitHits(p);
         check(`FIND MY MUSIC not covered, video chosen, at ${width}`, !miss.length, miss.join(' '));
+        const chosenH = [await hgt(p, '#file-pick'), await hgt(p, '#submit')];
+        check(`VIDEO CHOSEN and FIND MY MUSIC keep that height at ${width}`, sameH(...restH, ...chosenH), JSON.stringify(chosenH));
         if (!mobile) {
+          await p.hover('#submit');
+          await settle(p);
+          const findHover = await hgt(p, '#submit');
           await p.hover('#file-pick');
+          await settle(p);
+          const pickHover = await hgt(p, '#file-pick');
+          check(`hover keeps both frames' height at ${width}`, sameH(restH[0], findHover, pickHover), JSON.stringify({ findHover, pickHover }));
           miss = await submitHits(p);
           check(`FIND MY MUSIC not covered, video button hovered, at ${width}`, !miss.length, miss.join(' '));
           await p.mouse.move(0, 0);
@@ -393,6 +416,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
           const edges = Object.values(card.edges);
           check(`result sections share one left edge at ${width}`, edges.every((x) => x !== null && Math.abs(x - edges[0]) <= 1), JSON.stringify(card.edges));
           check(`result sections evenly spaced at ${width}`, card.gaps.length === 4 && Math.max(...card.gaps) - Math.min(...card.gaps) <= 1, JSON.stringify(card.gaps));
+          const span = await dividerSpan(p, '#found-card');
+          check(`divider lines run across the whole result card at ${width}`, span.ok && span.lines.length === 3, JSON.stringify(span.lines));
           // Reject 5: brand-red subheaders, the credit box's thin frame red at
           // rest, the main site's play icon on the found tracks.
           const r5 = await p.evaluate(() => ({
@@ -421,7 +446,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
             await settle(p);
             const hov = await p.$eval(btn, (el) => { const cs = getComputedStyle(el); return { t: cs.transform, f: cs.filter, color: cs.color, frame: cs.borderImageSource.match(/frame-[\w-]+/)?.[0] }; });
             await p.screenshot({ path: `${shotsDir}/found-another-hover-${width}.png`, fullPage: true });
-            check(`"check another video" only grows on hover at ${width}`, /^matrix\(1\.04, 0, 0, 1\.04/.test(hov.t) && hov.f === 'none' && hov.color === RED && hov.frame === 'frame-button-heavy-red', JSON.stringify(hov));
+            const anotherHover = await hgt(p, btn);
+            check(`"check another video" only grows across on hover (height kept) at ${width}`, /^matrix\(1\.04, 0, 0, 1, /.test(hov.t) && hov.f === 'none' && hov.color === RED && hov.frame === 'frame-button-heavy-red' && Math.abs(anotherHover[1] - anotherHover[0]) <= 0.5, JSON.stringify({ ...hov, anotherHover }));
             await p.mouse.move(0, 0);
           }
 
@@ -433,10 +459,16 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
             && tabs.map((t) => t.selected).join('|') === 'true|false|false|false', JSON.stringify(tabs));
           const shortName = { universal: 'yt', tiktok: 'tiktok', instagram: 'instagram', youtube_shorts: 'shorts' };
           const link1 = creditLink(id);
+          const boxHeights = [];
+          const tabHeights = [];
           for (const t of TABS) {
             await press(p, `#credit-tab-${t.value}`);
             await p.mouse.move(0, 0);
             await settle(p);
+            boxHeights.push(await hgt(p, '#credit .download-accred'));
+            tabHeights.push(...(await p.$$eval('#credit .accred-tab', (els) => els.map((el) => [el.offsetHeight, el.getBoundingClientRect().height]))));
+            const whereColor = await p.$eval('#credit .credit-where', (el) => getComputedStyle(el).color);
+            check(`"Paste in your ${CREDIT_LOCATION[t.medium]}:" in brand red at ${width}`, whereColor === RED, whereColor);
             const got = await p.evaluate(() => ({
               where: document.querySelector('#credit .credit-where').textContent,
               text: document.querySelector('#credit .accred-text').textContent,
@@ -448,6 +480,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
             check(`${t.label} tab fits ${width}`, await noOverflow(p));
             await p.screenshot({ path: `${shotsDir}/found-${shortName[t.value]}-${width}.png`, fullPage: true });
           }
+          check(`the credit box keeps one height on every tab at ${width}`, sameH(...boxHeights), JSON.stringify(boxHeights));
+          check(`the platform tabs are all one height at ${width}`, sameH(...tabHeights), JSON.stringify(tabHeights));
           if (!mobile) {
             await p.focus('#credit-tab-youtube_shorts');
             const keys = [];
@@ -466,6 +500,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
               await settle(p);
               const ov = await p.$eval('#credit .accred-overlay', (el) => ({ text: el.textContent, opacity: getComputedStyle(el).opacity }));
               check(`credit box shows "COPY" (all caps) on hover at ${width}`, ov.text === 'COPY' && ov.opacity === '1', JSON.stringify(ov));
+              const hoverH = await hgt(p, '#credit .download-accred');
+              check(`hovering keeps the credit box's height at ${width}`, sameH(boxHeights[0], hoverH), JSON.stringify(hoverH));
               await p.screenshot({ path: `${shotsDir}/found-copy-hover-${width}.png`, fullPage: true });
             }
             await p.evaluate(() => navigator.clipboard.writeText(''));
@@ -477,6 +513,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
             await settle(p);
             const st = await p.$eval('#credit .download-accred', (el) => ({ label: el.getAttribute('aria-label'), copied: el.dataset.copied, overlay: el.querySelector('.accred-overlay').textContent, status: el.querySelector('[role="status"]').textContent }));
             check(`${t.label} credit says "Copied!" at ${width}`, st.label === 'Copied!' && st.copied === 'true' && st.overlay === 'Copied!' && st.status === 'Copied!', JSON.stringify(st));
+            const copiedH = await hgt(p, '#credit .download-accred');
+            check(`${t.label} "Copied!" keeps the credit box's height at ${width}`, sameH(boxHeights[0], copiedH), JSON.stringify(copiedH));
             if (t === TABS[0]) await p.screenshot({ path: `${shotsDir}/found-copied-${width}.png`, fullPage: true });
             if (!mobile) {
               await p.waitForTimeout(Math.max(0, 1500 - (Date.now() - t1)));
@@ -503,6 +541,7 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
           const rowsOk = (rows) => rows.length === two.expect.length && rows.every((row, i) => row.title === two.expect[i].title && row.artist === two.expect[i].artist && near(secs(row.time), two.expect[i].start_s));
           const found = await readRows(p, '#found-tracks');
           check(`found tracks with start times under the credit at ${width}`, rowsOk(found), `${JSON.stringify(found)} want ${JSON.stringify(two.expect.map((w) => [w.start_s, w.title, w.artist]))}`);
+          const playH = await hgt(p, '#found-tracks .play-btn');
           const before = await p.evaluate(() => window.__audios.length);
           await press(p, '#found-tracks .play-btn');
           await p.waitForFunction((k) => window.__audios[k] && window.__audios[k].currentTime > 0.5, before, { timeout: 20000 }).catch(() => {});
@@ -510,6 +549,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
           check(`found track plays at ${width}`, played.t > 0.5 && same(played.src, scan.matches[0]?.stream_url), JSON.stringify(played));
           const pauseIcon = await p.$eval('#found-tracks .play-btn', (b) => ({ src: b.querySelector('img')?.getAttribute('src'), pressed: b.getAttribute('aria-pressed'), label: b.getAttribute('aria-label') }));
           check(`a playing track shows the main site's pause icon at ${width}`, pauseIcon.src === '/music/icons/action-pause.webp' && pauseIcon.pressed === 'true' && pauseIcon.label.startsWith('Pause '), JSON.stringify(pauseIcon));
+          const pauseH = await hgt(p, '#found-tracks .play-btn');
+          check(`play and pause are one height at ${width}`, sameH(playH, pauseH), JSON.stringify({ playH, pauseH }));
           await p.evaluate((k) => window.__audios[k]?.pause(), before);
           check(`found state fits ${width}`, await noOverflow(p));
 
@@ -519,6 +560,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
           await p.evaluate(() => document.fonts.ready);
           await p.screenshot({ path: `${shotsDir}/v-result-${width}.png`, fullPage: true });
           check(`result page fits ${width}`, await noOverflow(p));
+          const vSpan = await dividerSpan(p, '#tracks-box');
+          check(`/v/ divider lines run across the whole track list at ${width}`, vSpan.ok, JSON.stringify(vSpan.lines));
           const rows = await readRows(p, '#tracks');
           check(`result rows in order with start, title, artist at ${width}`, rowsOk(rows), JSON.stringify(rows));
           check(`result summary at ${width}`, (await p.textContent('#summary')) === `${two.expect.length} Real Audio tracks are in this video, in order.`);

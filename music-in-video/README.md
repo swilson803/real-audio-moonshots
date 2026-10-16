@@ -17,6 +17,10 @@ sits in one light sketched card, its sections split by faint dividers.
 Subheaders are brand red, the credit box's thin frame is red, its hover
 label reads COPY, and found tracks play with the main site's play / pause
 icons (`public/music/icons/`, from real-audio-creator `public/icons-runtime/`).
+Button frames keep one height in every state (hover grows them across
+only; the credit box is as tall as its tallest platform credit), the
+"Paste in your …:" line is brand red, and the faint dividers run across
+the whole frame.
 
 Shares one Worker, `real-audio-moonshots`, and its domain
 (copyrighttester.real.audio) with the clearance check:
