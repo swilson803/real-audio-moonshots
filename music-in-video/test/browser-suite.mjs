@@ -393,6 +393,21 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
           const edges = Object.values(card.edges);
           check(`result sections share one left edge at ${width}`, edges.every((x) => x !== null && Math.abs(x - edges[0]) <= 1), JSON.stringify(card.edges));
           check(`result sections evenly spaced at ${width}`, card.gaps.length === 4 && Math.max(...card.gaps) - Math.min(...card.gaps) <= 1, JSON.stringify(card.gaps));
+          // Reject 5: brand-red subheaders, the credit box's thin frame red at
+          // rest, the main site's play icon on the found tracks.
+          const r5 = await p.evaluate(() => ({
+            headings: [...document.querySelectorAll('#found-card .credit-heading')].map((h) => [h.textContent, getComputedStyle(h).color]),
+            frame: getComputedStyle(document.querySelector('#credit .download-accred')).borderImageSource.match(/frame-[\w-]+/)?.[0] ?? null,
+            play: [...document.querySelectorAll('#found-tracks .play-btn')].map((b) => {
+              const img = b.querySelector('img.play-icon');
+              const r = img?.getBoundingClientRect();
+              return { src: img?.getAttribute('src') ?? null, loaded: !!img && img.complete && img.naturalWidth > 0, w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0), text: b.textContent.trim(), frame: getComputedStyle(b).borderImageSource, label: b.getAttribute('aria-label') };
+            }),
+          }));
+          check(`subheaders in brand red at ${width}`, r5.headings.map((h) => h[0]).join('|') === 'Where are you posting?|Found tracks' && r5.headings.every((h) => h[1] === RED), JSON.stringify(r5.headings));
+          check(`credit box's thin frame is red at rest at ${width}`, r5.frame === 'frame-card-light-red', String(r5.frame));
+          check(`found tracks use the main site's play icon at ${width}`,
+            r5.play.length === two.expect.length && r5.play.every((b, i) => b.src === '/music/icons/action-play.webp' && b.loaded && b.w === 48 && b.h === 48 && b.text === '' && b.frame === 'none' && b.label === `Play ${two.expect[i].title} by ${two.expect[i].artist}`), JSON.stringify(r5.play));
           const another = await p.$eval('#found .actions', (el) => ({
             n: el.children.length, cls: el.firstElementChild.className, text: el.textContent.trim(), href: el.firstElementChild.getAttribute('href'),
           }));
@@ -450,7 +465,7 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
               await p.hover('#credit .download-accred');
               await settle(p);
               const ov = await p.$eval('#credit .accred-overlay', (el) => ({ text: el.textContent, opacity: getComputedStyle(el).opacity }));
-              check(`credit box shows "Copy" on hover at ${width}`, ov.text === 'Copy' && ov.opacity === '1', JSON.stringify(ov));
+              check(`credit box shows "COPY" (all caps) on hover at ${width}`, ov.text === 'COPY' && ov.opacity === '1', JSON.stringify(ov));
               await p.screenshot({ path: `${shotsDir}/found-copy-hover-${width}.png`, fullPage: true });
             }
             await p.evaluate(() => navigator.clipboard.writeText(''));
@@ -493,6 +508,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
           await p.waitForFunction((k) => window.__audios[k] && window.__audios[k].currentTime > 0.5, before, { timeout: 20000 }).catch(() => {});
           const played = await p.evaluate((k) => ({ src: window.__audios[k]?.src, t: window.__audios[k]?.currentTime ?? 0 }), before);
           check(`found track plays at ${width}`, played.t > 0.5 && same(played.src, scan.matches[0]?.stream_url), JSON.stringify(played));
+          const pauseIcon = await p.$eval('#found-tracks .play-btn', (b) => ({ src: b.querySelector('img')?.getAttribute('src'), pressed: b.getAttribute('aria-pressed'), label: b.getAttribute('aria-label') }));
+          check(`a playing track shows the main site's pause icon at ${width}`, pauseIcon.src === '/music/icons/action-pause.webp' && pauseIcon.pressed === 'true' && pauseIcon.label.startsWith('Pause '), JSON.stringify(pauseIcon));
           await p.evaluate((k) => window.__audios[k]?.pause(), before);
           check(`found state fits ${width}`, await noOverflow(p));
 

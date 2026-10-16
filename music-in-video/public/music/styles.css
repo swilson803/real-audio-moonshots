@@ -341,13 +341,10 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
 .track-text { display: flex; flex-direction: column; min-width: 0; }
 .track-title { font-size: 22px; line-height: 1.2; overflow-wrap: anywhere; }
 .track-artist { font-size: 16px; line-height: 1.3; color: var(--color-gray-mid); overflow-wrap: anywhere; }
-.play-btn { font-size: 16px; padding: 8px 14px; white-space: nowrap; }
 @media (max-width: 420px) {
   .track { column-gap: 10px; }
   .track-time { min-width: 0; }
   .track-time, .track-title { font-size: 20px; }
-  .play-btn { padding: 6px 10px; }
-  .play-word { display: none; }
 }
 
 /* ── MS-007 Reject 1 (local) ──────────────────────────────────────────── */
@@ -484,3 +481,22 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
 .result-tracks .credit-heading { margin-bottom: 4px; }
 /* The track rows end at the card's edge, like the credit above them. */
 .result-tracks .tracks > .track:last-child { padding-bottom: 0; }
+
+/* ── MS-007 Reject 5 (local) ──────────────────────────────────────────── */
+
+/* Play / pause: the main site's icon (TrackCard: w-12 h-12 object-contain on
+   a bare button), no frame. Hover grows it a little, like the site's buttons. */
+.play-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer;
+  transition: transform 120ms ease;
+}
+.play-btn:hover { transform: scale(1.04); }
+.play-btn:active { transform: scale(0.98); }
+.play-btn:focus-visible { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; border-radius: 50%; }
+.play-icon { display: block; width: 48px; height: 48px; object-fit: contain; }
+
+/* The section subheaders ("Where are you posting?", "Found tracks") in brand
+   red, and the credit box's thin frame red at rest (it was black until hover). */
+.credit-heading { color: var(--color-red); }
+.download-accred { border-image-source: url('brand-assets/frames/frame-card-light-red.webp'); }

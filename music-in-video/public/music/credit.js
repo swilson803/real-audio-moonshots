@@ -76,15 +76,15 @@ const el = (tag, className, text) => {
   return e;
 };
 
-// The credit box (main's CopyBlock): shows the credit; a brand-red "Copy"
-// overlay on hover; a click flips it to "Copied!" at once (not waiting on the
+// The credit box (main's CopyBlock): shows the credit; a brand-red "COPY"
+// overlay on hover (all caps, Reject 5); a click flips it to "Copied!" at once (not waiting on the
 // clipboard), held for at least 2 s and, while the pointer is still on the
 // box, until it leaves.
 function copyBlock(text, wrapLink) {
   const box = el('button', 'download-accred');
   box.type = 'button';
   const shown = el('span', wrapLink ? 'accred-text accred-text--link' : 'accred-text', text);
-  const overlay = el('span', 'accred-overlay', 'Copy');
+  const overlay = el('span', 'accred-overlay', 'COPY');
   overlay.setAttribute('aria-hidden', 'true');
   const status = el('span', 'sr-only');
   status.setAttribute('role', 'status');
@@ -97,7 +97,7 @@ function copyBlock(text, wrapLink) {
   const set = (copied) => {
     box.dataset.copied = String(copied);
     box.setAttribute('aria-label', copied ? 'Copied!' : 'Copy credit');
-    overlay.textContent = copied ? 'Copied!' : 'Copy';
+    overlay.textContent = copied ? 'Copied!' : 'COPY';
     status.textContent = copied ? 'Copied!' : '';
   };
   set(false);
