@@ -485,14 +485,11 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
 /* ── MS-007 Reject 5 (local) ──────────────────────────────────────────── */
 
 /* Play / pause: the main site's icon (TrackCard: w-12 h-12 object-contain on
-   a bare button), no frame. Hover grows it a little, like the site's buttons. */
+   a bare button), no frame and, as there, no hover growth. */
 .play-btn {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer;
-  transition: transform 120ms ease;
 }
-.play-btn:hover { transform: scale(1.04); }
-.play-btn:active { transform: scale(0.98); }
 .play-btn:focus-visible { outline: 2px solid hsl(var(--brand-accent)); outline-offset: 3px; border-radius: 50%; }
 .play-icon { display: block; width: 48px; height: 48px; object-fit: contain; }
 
@@ -500,3 +497,44 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
    red, and the credit box's thin frame red at rest (it was black until hover). */
 .credit-heading { color: var(--color-red); }
 .download-accred { border-image-source: url('brand-assets/frames/frame-card-light-red.webp'); }
+
+/* ── MS-007 Reject 6 (local) ──────────────────────────────────────────── */
+
+/* Button frames keep their height in every state.
+   - Hover / press still grow / shrink a button (Reject 1's "only expand on
+     hover"), but only across: scaleX, so the frame's height never changes.
+   - CHOOSE VIDEO stays on one line on the narrowest phones, like FIND MY
+     MUSIC, so the two are the same height (it wrapped to 86px at 281).
+   - The credit box is as tall as the tallest platform's credit
+     (.accred-stack, credit.js), so switching tabs never resizes it. */
+.btn-primary-cta:hover { transform: scaleX(1.02); }
+.btn-default:active,
+.btn-primary-cta:active { transform: scaleX(0.98); }
+.file-pick:hover { transform: scaleX(1.04); }
+.actions .btn-primary-cta:hover { transform: scaleX(1.04); }
+.actions .btn-primary-cta:active { transform: scaleX(0.98); }
+@media (max-width: 359px) {
+  .file-pick { white-space: nowrap; padding-left: 12px; padding-right: 12px; }
+}
+.accred-stack { display: grid; }
+.accred-stack > * { grid-area: 1 / 1; }
+.accred-sizer { visibility: hidden; }
+
+/* "Paste in your description / caption:" in brand red, like the subheaders. */
+.credit-where { color: var(--color-red); }
+
+/* Faint divider lines run across the whole frame: through the box's side
+   padding to its drawn line (~2px inside the frame's inner edge), on the
+   result card and in the track lists. --pad-x follows each box's padding. */
+.box-sketched-light { --pad-x: var(--space-4); --line-in: 2px; }
+.result-card { --pad-x: 20px; }
+@media (min-width: 640px) { .result-card { --pad-x: 28px; } }
+@media (max-width: 359px) {
+  .result-card { --pad-x: 8px; }
+  #tracks-box { --pad-x: 6px; }
+}
+.box-sketched-light .divider-quiet {
+  width: calc(100% + 2 * (var(--pad-x) + var(--line-in)));
+  max-width: none;
+  margin-left: calc(-1 * (var(--pad-x) + var(--line-in)));
+}

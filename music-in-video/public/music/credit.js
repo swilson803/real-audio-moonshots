@@ -80,16 +80,26 @@ const el = (tag, className, text) => {
 // overlay on hover (all caps, Reject 5); a click flips it to "Copied!" at once (not waiting on the
 // clipboard), held for at least 2 s and, while the pointer is still on the
 // box, until it leaves.
-function copyBlock(text, wrapLink) {
+// others: every tab's credit ({ text, wrapLink }), stacked invisibly in the
+// same grid cell as the shown one, so the box is always as tall as the
+// tallest credit and keeps its height whichever tab is picked (Reject 6).
+function copyBlock(text, wrapLink, others = []) {
   const box = el('button', 'download-accred');
   box.type = 'button';
-  const shown = el('span', wrapLink ? 'accred-text accred-text--link' : 'accred-text', text);
+  const textClass = (link) => (link ? 'accred-text accred-text--link' : 'accred-text');
+  const shown = el('span', textClass(wrapLink), text);
+  const stack = el('span', 'accred-stack');
+  stack.append(shown, ...others.map((o) => {
+    const sizer = el('span', `${textClass(o.wrapLink)} accred-sizer`, o.text);
+    sizer.setAttribute('aria-hidden', 'true');
+    return sizer;
+  }));
   const overlay = el('span', 'accred-overlay', 'COPY');
   overlay.setAttribute('aria-hidden', 'true');
   const status = el('span', 'sr-only');
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  box.append(shown, overlay, status);
+  box.append(stack, overlay, status);
 
   let hover = false;
   let minElapsed = true;
@@ -142,6 +152,8 @@ export function mountCredit(root, matches, link) {
     return b;
   });
 
+  const sizers = TABS.map((t) => ({ text: creditText(t, matches, link), wrapLink: t.medium === 'description' }));
+
   const select = (i, focus = false) => {
     tabs.forEach((b, j) => {
       const on = i === j;
@@ -155,7 +167,7 @@ export function mountCredit(root, matches, link) {
     panel.dataset.value = tab.value;
     panel.replaceChildren(
       el('p', 'credit-where', `Paste in your ${CREDIT_LOCATION[tab.medium]}:`),
-      copyBlock(creditText(tab, matches, link), tab.medium === 'description'),
+      copyBlock(creditText(tab, matches, link), tab.medium === 'description', sizers),
     );
   };
 
