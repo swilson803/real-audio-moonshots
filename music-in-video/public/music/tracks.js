@@ -1,7 +1,8 @@
 // The found-tracks list, shared by the upload page (under the credit) and the
 // result page /v/<id>: every found track in video order with its start time,
-// title, artist and a stream button. The track's audio is streamed from Real
-// Audio's public catalog only when Play is pressed (preload="none" until then).
+// title, artist and a play button with the main site's icon. The track's
+// audio is streamed from Real Audio's public catalog only when Play is
+// pressed (preload="none" until then).
 
 export const clock = (s) => {
   const t = Math.max(0, Math.round(s));
@@ -13,12 +14,18 @@ export const clock = (s) => {
 
 let playing = null; // { audio, button } of the one track playing
 
-// Icon plus a word; narrow screens hide the word (the aria-label stays).
-function setButton(button, isPlaying) {
-  const word = document.createElement('span');
-  word.className = 'play-word';
-  word.textContent = isPlaying ? ' pause' : ' play';
-  button.replaceChildren(isPlaying ? '❚❚' : '▶', word);
+// The main site's play / pause icons (real-audio-creator TrackCard,
+// public/icons-runtime/action-{play,pause}.webp), 48px, on a bare button.
+const ICONS = { play: '/music/icons/action-play.webp', pause: '/music/icons/action-pause.webp' };
+
+function setButton(button, isPlaying, match) {
+  const img = document.createElement('img');
+  img.className = 'play-icon';
+  img.src = isPlaying ? ICONS.pause : ICONS.play;
+  img.alt = '';
+  img.decoding = 'async';
+  button.replaceChildren(img);
+  button.setAttribute('aria-label', `${isPlaying ? 'Pause' : 'Play'} ${match.title} by ${match.artist}`);
   button.setAttribute('aria-pressed', String(isPlaying));
 }
 
@@ -40,18 +47,17 @@ function row(match) {
 
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'btn-default play-btn';
-  button.setAttribute('aria-label', `Play ${match.title} by ${match.artist}`);
-  setButton(button, false);
+  button.className = 'play-btn';
+  setButton(button, false, match);
   let audio = null;
   button.addEventListener('click', () => {
     if (!audio) {
       audio = new Audio();
       audio.preload = 'none';
       audio.src = match.stream_url;
-      audio.addEventListener('ended', () => setButton(button, false));
-      audio.addEventListener('pause', () => setButton(button, false));
-      audio.addEventListener('play', () => setButton(button, true));
+      audio.addEventListener('ended', () => setButton(button, false, match));
+      audio.addEventListener('pause', () => setButton(button, false, match));
+      audio.addEventListener('play', () => setButton(button, true, match));
     }
     if (playing && playing.audio !== audio) playing.audio.pause();
     if (audio.paused) {

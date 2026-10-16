@@ -14,6 +14,9 @@ site's one-link system (CF-040): `music in this video: https://copyrighttester.r
 for descriptions, `music from @<Real Audio's handle> - <track> <artist>, …`
 for short-form captions. The result (summary, credit block, found tracks)
 sits in one light sketched card, its sections split by faint dividers.
+Subheaders are brand red, the credit box's thin frame is red, its hover
+label reads COPY, and found tracks play with the main site's play / pause
+icons (`public/music/icons/`, from real-audio-creator `public/icons-runtime/`).
 
 Shares one Worker, `real-audio-moonshots`, and its domain
 (copyrighttester.real.audio) with the clearance check:
