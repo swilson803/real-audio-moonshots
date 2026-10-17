@@ -356,11 +356,18 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
 /* Two-step guide (Reject 3): both buttons wear the same frame (the search
    frame FIND MY MUSIC already has, same slice and width). Until a usable video
    is chosen, CHOOSE VIDEO is brand red and FIND MY MUSIC brand black; then they
-   swap: VIDEO CHOSEN black, FIND MY MUSIC red (app.js sets .is-chosen). */
+   swap: VIDEO CHOSEN black, FIND MY MUSIC red (app.js sets .is-chosen).
+   Reject 7: the red and black search frames are different drawings. In the
+   2172x724 images the black rectangle's top / bottom strokes start 62 / 64px
+   in, the red one's 147 / 166px; at slice 210 in a 15px border that drew the
+   red rectangle 6.07 / 7.29px further in, so a red button looked ~14px
+   shorter than a black one. The red frame is pushed out by exactly that
+   (border-image-outset), so both draw the same rectangle. */
 .check-form .file-pick {
   border-image-source: url('brand-assets/frames/frame-search-heavy-red.webp');
   border-image-slice: 210;
   border-width: 15px;
+  border-image-outset: 6.07px 0 7.29px;
 }
 .check-form .my-login-buttons .btn-primary-cta {
   color: var(--color-black);
@@ -369,10 +376,12 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
 .check-form.is-chosen .file-pick {
   color: var(--color-black);
   border-image-source: url('brand-assets/frames/frame-search-heavy-black.webp');
+  border-image-outset: 0;
 }
 .check-form.is-chosen .my-login-buttons .btn-primary-cta {
   color: var(--color-red);
   border-image-source: url('brand-assets/frames/frame-search-heavy-red.webp') !important;
+  border-image-outset: 6.07px 0 7.29px;
 }
 
 /* FIND MY MUSIC always on top of the (transformed) file field, and on one

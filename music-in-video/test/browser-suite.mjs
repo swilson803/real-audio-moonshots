@@ -308,6 +308,37 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
     // whether each faint divider in a sketched box runs to the box's drawn
     // line (~2px inside the frame's inner edge) on both sides.
     const hgt = (page, sel) => page.$eval(sel, (el) => [Math.round(el.offsetHeight * 10) / 10, Math.round(el.getBoundingClientRect().height * 10) / 10]);
+    // Drawn height of each upload button: the rows of a screenshot (button
+    // plus a margin) whose pixels clearly differ from the flat cream page.
+    const drawnHeights = async (page) => {
+      await page.waitForTimeout(300);
+      const out = {};
+      for (const [name, sel] of [['choose', '#file-pick'], ['find', '#submit']]) {
+        const r = await page.$eval(sel, (el) => { el.scrollIntoView({ block: 'center' }); return el.getBoundingClientRect().toJSON(); });
+        const png = await page.screenshot({ clip: { x: Math.max(0, r.x - 14), y: Math.max(0, r.y - 14), width: r.width + 28, height: r.height + 28 } });
+        out[name] = await page.evaluate(async (b64) => {
+          const img = new Image();
+          img.src = `data:image/png;base64,${b64}`;
+          await img.decode();
+          const c = document.createElement('canvas');
+          c.width = img.width;
+          c.height = img.height;
+          const g = c.getContext('2d');
+          g.drawImage(img, 0, 0);
+          const d = g.getImageData(0, 0, c.width, c.height).data;
+          let top = Infinity;
+          let bottom = -1;
+          for (let y = 0; y < c.height; y++) {
+            for (let x = 0; x < c.width; x++) {
+              const i = (y * c.width + x) * 4;
+              if (Math.hypot(d[i] - 255, d[i + 1] - 248, d[i + 2] - 224) > 60) { top = Math.min(top, y); bottom = y; break; }
+            }
+          }
+          return bottom < 0 ? 0 : bottom - top + 1;
+        }, png.toString('base64'));
+      }
+      return out;
+    };
     const sameH = (...hs) => hs.every((h) => Math.abs(h[0] - hs[0][0]) <= 0.5 && Math.abs(h[1] - hs[0][0]) <= 0.5);
     const dividerSpan = (page, boxSel) => page.$eval(boxSel, (box) => {
       const br = box.getBoundingClientRect();
@@ -603,6 +634,31 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       await hp.evaluate(() => document.fonts.ready);
       await headerChecks(hp, 'upload page', width);
       await hp.context().close();
+
+      // Reject 7: the two buttons look the same height on screen, in every
+      // state. Their boxes were both 70px, but the red and black frame images
+      // draw different rectangles, so what is drawn is measured: each button
+      // on a flat background (this page only), the rows its frame and label
+      // ink cover.
+      const dp = await newPage({ width, height: 900 }, mobile ? { hasTouch: true, isMobile: true } : {});
+      await dp.goto(`${origin}/music/`);
+      await dp.addStyleTag({ content: 'html, body, .page, .surface-sketched { background: #FFF8E0 !important; } .my-login-modal { border-image-source: none !important; } .file-name, .file-hint, .field-error, .scan-status { visibility: hidden !important; }' });
+      await dp.evaluate(() => document.fonts.ready);
+      const drawn = { rest: await drawnHeights(dp) };
+      await dp.setInputFiles('#file', { name: 'RA_TEST_heights.mp4', mimeType: 'video/mp4', buffer: Buffer.from('x') });
+      drawn.chosen = await drawnHeights(dp);
+      if (!mobile) {
+        await dp.hover('#file-pick');
+        drawn.hoverChoose = await drawnHeights(dp);
+        await dp.hover('#submit');
+        drawn.hoverFind = await drawnHeights(dp);
+        await dp.mouse.move(0, 0);
+      }
+      await dp.evaluate(() => { const s = document.getElementById('submit'); s.disabled = true; s.textContent = 'LISTENING…'; });
+      drawn.disabled = await drawnHeights(dp);
+      check(`CHOOSE VIDEO and FIND MY MUSIC drawn the same height in every state at ${width}`,
+        Object.values(drawn).every((d) => d.choose >= 55 && Math.abs(d.choose - d.find) <= 2), JSON.stringify(drawn));
+      await dp.context().close();
       await p.context().close();
     }
 
