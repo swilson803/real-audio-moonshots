@@ -383,6 +383,12 @@ a.btn-default, a.btn-primary-cta { text-decoration: none; }
   border-image-source: url('brand-assets/frames/frame-search-heavy-red.webp') !important;
   border-image-outset: 6.07px 0 7.29px;
 }
+/* Reject 8: both shorter. 5px above and below the label (not 12px) makes each
+   box 56px (was 70) and the drawn rectangle ~48px (was ~62), the shorter
+   look from before r7. The frame, label and widths are unchanged; the outset
+   above depends only on slice and border width, so both still match. */
+.check-form .file-pick,
+.check-form .my-login-buttons .btn-primary-cta { padding-top: 5px; padding-bottom: 5px; }
 
 /* FIND MY MUSIC always on top of the (transformed) file field, and on one
    line on the narrowest phones (at 281 it wrapped to two). */
