@@ -20,7 +20,9 @@ icons (`public/music/icons/`, from real-audio-creator `public/icons-runtime/`).
 Button frames keep one height in every state (hover grows them across
 only; the credit box is as tall as its tallest platform credit), the
 "Paste in your …:" line is brand red, and the faint dividers run across
-the whole frame.
+the whole frame. CHOOSE VIDEO and FIND MY MUSIC draw the same rectangle in
+red or black (the red search frame is pushed out to the black frame's
+geometry with `border-image-outset`).
 
 Shares one Worker, `real-audio-moonshots`, and its domain
 (copyrighttester.real.audio) with the clearance check:
