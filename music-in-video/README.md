@@ -22,7 +22,7 @@ only; the credit box is as tall as its tallest platform credit), the
 "Paste in your …:" line is brand red, and the faint dividers run across
 the whole frame. CHOOSE VIDEO and FIND MY MUSIC draw the same rectangle in
 red or black (the red search frame is pushed out to the black frame's
-geometry with `border-image-outset`).
+geometry with `border-image-outset`), both ~48px tall as drawn (56px boxes).
 
 Shares one Worker, `real-audio-moonshots`, and its domain
 (copyrighttester.real.audio) with the clearance check:

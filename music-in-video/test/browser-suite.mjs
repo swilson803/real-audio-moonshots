@@ -635,8 +635,8 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       await headerChecks(hp, 'upload page', width);
       await hp.context().close();
 
-      // Reject 7: the two buttons look the same height on screen, in every
-      // state. Their boxes were both 70px, but the red and black frame images
+      // Rejects 7 and 8: the two buttons look the same height on screen, in
+      // every state, and shorter (Reject 8: ~48px drawn). Their boxes were both 70px, but the red and black frame images
       // draw different rectangles, so what is drawn is measured: each button
       // on a flat background (this page only), the rows its frame and label
       // ink cover.
@@ -657,7 +657,12 @@ export async function runBrowserSuite({ origin, videos, videosDir, catalog, shot
       await dp.evaluate(() => { const s = document.getElementById('submit'); s.disabled = true; s.textContent = 'LISTENING…'; });
       drawn.disabled = await drawnHeights(dp);
       check(`CHOOSE VIDEO and FIND MY MUSIC drawn the same height in every state at ${width}`,
-        Object.values(drawn).every((d) => d.choose >= 55 && Math.abs(d.choose - d.find) <= 2), JSON.stringify(drawn));
+        Object.values(drawn).every((d) => Math.abs(d.choose - d.find) <= 2), JSON.stringify(drawn));
+      // Reject 8: and shorter, the pre-r7 shorter look: ~48px drawn, 56px boxes.
+      check(`CHOOSE VIDEO and FIND MY MUSIC drawn 44-52px (shorter) in every state at ${width}`,
+        Object.values(drawn).every((d) => [d.choose, d.find].every((h) => h >= 44 && h <= 52)), JSON.stringify(drawn));
+      const boxes = await dp.evaluate(() => ['file-pick', 'submit'].map((id) => document.getElementById(id).offsetHeight));
+      check(`CHOOSE VIDEO and FIND MY MUSIC boxes are 56px at ${width}`, boxes.every((h) => h === 56), JSON.stringify(boxes));
       await dp.context().close();
       await p.context().close();
     }
