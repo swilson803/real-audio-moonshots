@@ -7,9 +7,11 @@
 // music-in-video/dist by `npm run build` (root package.json), which Wrangler
 // runs before every deploy (build.command below).
 // name: "real-audio-moonshots", the live Worker Workers Builds deploys to
-// (custom domain copyrighttester.real.audio is on it). crons, vars and
-// previews are unchanged from the clearance-check-only config, so its
-// domain, its secrets and its cron stay the same.
+// (custom domains copyrighttester.real.audio and autocreditor.real.audio
+// are on it, attached outside this config; no routes here, so deploys never
+// touch them). crons, vars and previews are unchanged from the
+// clearance-check-only config, so its domain, its secrets and its cron stay
+// the same.
 //
 // Secrets (set on the Worker in the dashboard, never committed, untouched by
 // deploys): SUPABASE_SECRET_KEY (moonshots service role; the Worker also
@@ -34,7 +36,9 @@
   "assets": {
     "directory": "./music-in-video/dist",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/r/*", "/v/*"]
+    // "/": so the Worker sees the root and can redirect autocreditor.real.audio
+    // to /music/ (every other host gets the same index.html from ASSETS).
+    "run_worker_first": ["/", "/api/*", "/r/*", "/v/*"]
   },
   "vars": {
     // moonshots project ONLY. Never uprfsmwbsvzuoiyfgtgx (production).

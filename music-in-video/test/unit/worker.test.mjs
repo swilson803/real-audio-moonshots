@@ -74,7 +74,7 @@ const env = {
   JOBS: { send: async (m) => { sent.push(m); } },
   PROCESSOR,
 };
-const call = (path, init, e = env) => worker.fetch(new Request(`https://copyrighttester.real.audio${path}`, init), e, { waitUntil() {} });
+const call = (path, init, e = env, host = 'copyrighttester.real.audio') => worker.fetch(new Request(`https://${host}${path}`, init), e, { waitUntil() {} });
 const scan = (buf, headers = {}, e = env) => call('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', ...headers }, body: buf }, e);
 const message = (body, attempts = 1) => ({
   body, attempts, acked: false, retried: null,
@@ -287,6 +287,26 @@ test('pages: /music redirects, /v/<id> serves the result page', async () => {
   assetPaths.length = 0;
   await call('/v/Ab3dE5gH9k');
   assert.deepEqual(assetPaths, ['/v/']);
+});
+
+test('pages: autocreditor.real.audio/ redirects to /music/, its other paths are the same Worker', async () => {
+  const onAuto = (path) => call(path, undefined, env, 'autocreditor.real.audio');
+  const r = await onAuto('/');
+  assert.equal(r.status, 302);
+  assert.equal(r.headers.get('Location'), 'https://autocreditor.real.audio/music/');
+  assert.equal((await onAuto('/music')).headers.get('Location'), 'https://autocreditor.real.audio/music/');
+  assetPaths.length = 0;
+  await onAuto('/music/');
+  await onAuto('/v/Ab3dE5gH9k');
+  await onAuto('/r/2b7e1516-28ae-4d2a-9f3c-0a1b2c3d4e5f');
+  assert.deepEqual(assetPaths, ['/music/', '/v/', '/r/']);
+  const cfg = await onAuto('/api/config');
+  assert.equal(cfg.status, 200);
+  assert.deepEqual(await cfg.json(), { supabaseUrl: MOONSHOTS, anonKey: 'eyJanon.test' });
+  // copyrighttester's / is not redirected.
+  const root = await call('/');
+  assert.equal(root.status, 200);
+  assert.equal(await root.text(), 'asset /');
 });
 
 test('clearance-check routes pass through unchanged', async () => {

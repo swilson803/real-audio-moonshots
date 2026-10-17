@@ -3,6 +3,7 @@
 // with the MS-002/MS-004 clearance check.
 //
 // Ours:
+//   autocreditor.real.audio/   302 to /music/ (the domain is on this Worker too)
 //   /music/                    upload page (static, public/music/)
 //   /v/<id>                    result page (static, public/v/; result.js reads the id)
 //   POST /api/scan             queue a soundtrack (src/scan.js)
@@ -65,6 +66,7 @@ export default {
     }
 
     if (pathname === '/music') return Response.redirect(new URL('/music/', url), 301);
+    if (url.hostname === 'autocreditor.real.audio' && pathname === '/') return Response.redirect(new URL('/music/', url), 302);
 
     // /v/<id> is one static page.
     if (/^\/v\/[^/]+\/?$/.test(pathname)) {
